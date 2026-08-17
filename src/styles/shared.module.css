@@ -1,0 +1,54 @@
+.section {
+  background: var(--bg);
+  padding: 22px 28px;
+}
+
+.title {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700; font-size: 15px;
+  text-transform: uppercase; letter-spacing: 3px;
+  color: var(--dim); margin-bottom: 16px;
+}
+.title::before { content: '▮ '; color: var(--lime); }
+.title span { font-weight: 500; }
+
+.btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 2px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line);
+  padding: 13px 10px; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btn:hover { border-color: var(--lime); color: var(--lime); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.hazard {
+  background: repeating-linear-gradient(-45deg, var(--lime) 0 12px, #a8dc1a 12px 24px);
+  color: #0a0a08; border: none; font-size: 14px; padding: 16px;
+}
+.hazard:hover { filter: brightness(1.1); color: #0a0a08; }
+.hazard.armed {
+  background: repeating-linear-gradient(-45deg, var(--red) 0 12px, #d43a2a 12px 24px);
+  color: #fff;
+}
+
+.table { width: 100%; border-collapse: collapse; }
+.table th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+  color: var(--dim); font-weight: 500;
+  border-bottom: 1px solid var(--line); padding: 8px 10px;
+}
+.table td { padding: 9px 10px; border-bottom: 1px solid rgba(35,35,30,0.5); }
+.table tr:hover td { background: rgba(198,254,40,0.03); }
+.num { text-align: right; }
+.table th.num { text-align: right; }
+.table td.num { font-weight: 500; }
+
+.panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 20px;
+  margin-bottom: 20px;
+}

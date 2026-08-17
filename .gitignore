@@ -1,0 +1,14 @@
+# deps / build
+node_modules/
+dist/
+
+# runtime user data written by server.cjs
+backups/
+telemetry/
+targets.json
+
+# tooling / local state
+.claude/
+.gstack/
+.DS_Store
+*.log

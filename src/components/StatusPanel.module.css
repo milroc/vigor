@@ -1,0 +1,20 @@
+.statGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+
+.stat label {
+  display: block; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 2px; color: var(--dim); margin-bottom: 4px;
+}
+
+.val {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 900; font-size: 34px; line-height: 1; color: var(--text);
+}
+.val.lit { color: var(--lime); }
+.val.small { font-size: 20px; }
+.unit { font-size: 14px; font-weight: 500; color: var(--dim); margin-left: 3px; }
+
+.batteryBar {
+  grid-column: 1 / -1; height: 8px;
+  background: var(--panel); border: 1px solid var(--line); margin-top: -6px;
+}
+.batteryFill { height: 100%; background: var(--lime); width: 0%; transition: width 0.6s; }

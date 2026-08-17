@@ -1,0 +1,42 @@
+.header {
+  display: flex; align-items: baseline; gap: 28px;
+  padding: 20px 28px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.wordmark {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 900; font-size: 42px; letter-spacing: 1px;
+  color: var(--lime); line-height: 1;
+  text-decoration: none;
+}
+.wordmark small {
+  color: var(--text); font-weight: 500; font-size: 18px;
+  letter-spacing: 4px; margin-left: 10px;
+}
+
+.nav { display: flex; gap: 4px; align-self: flex-end; }
+
+.navLink {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim); text-decoration: none;
+  padding: 8px 14px; border: 1px solid transparent;
+}
+.navLink:hover { color: var(--text); }
+.navLink.active { color: var(--lime); border-color: var(--line); border-bottom-color: var(--bg); }
+
+.connBadge {
+  margin-left: auto; display: flex; align-items: center; gap: 8px;
+  text-transform: uppercase; letter-spacing: 2px; font-size: 11px; color: var(--dim);
+}
+.connDot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); }
+.connDot.on { background: var(--lime); box-shadow: 0 0 12px var(--lime); animation: pulse 2s infinite; }
+@keyframes pulse { 50% { opacity: 0.5; } }
+
+@media (max-width: 980px) {
+  .header { flex-wrap: wrap; gap: 8px 16px; padding: 12px 16px 10px; }
+  .wordmark { font-size: 30px; }
+  .nav { flex-wrap: wrap; }
+  .navLink { padding: 6px 8px; letter-spacing: 1px; }
+  .connBadge { margin-left: 0; flex-basis: 100%; }
+}

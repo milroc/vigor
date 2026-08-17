@@ -1,0 +1,43 @@
+.wrap { margin: 14px 0; }
+
+/* Default: the plot keeps the classic 640x180 shape via aspect-ratio.
+   fill mode lets a flex parent set the height instead (fit-to-screen) —
+   desktop only; on narrow screens there is no fixed-height parent, so
+   fill charts fall back to the aspect-ratio layout. */
+.plot { position: relative; }
+@media (min-width: 981px) {
+  /* min-height + aspect-ratio is safe here: the ratio height always exceeds
+     the min at desktop widths, so no min transfers into the width axis. */
+  .plot { aspect-ratio: 640 / 180; min-height: 130px; }
+  .fill { display: flex; flex-direction: column; min-height: 0; margin: 10px 0; }
+  .fill .plot { flex: 1; min-height: 130px; aspect-ratio: auto; }
+}
+@media (max-width: 980px) {
+  /* Fixed height on narrow screens: aspect-ratio would give squat plots,
+     and pairing it with a min-height transfers into min-width (overflow). */
+  .plot { height: 160px; }
+}
+
+.name {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--text); margin-bottom: 6px;
+}
+.name span { color: var(--dim); font-weight: 500; margin-left: 6px; text-transform: none; }
+
+.svg { position: absolute; inset: 0; width: 100%; height: 100%; border: 1px solid var(--line); background: rgba(17,17,16,0.6); }
+
+.axisLabel { font-family: 'IBM Plex Mono', monospace; font-size: 9px; fill: var(--dim); }
+.divLabel { font-family: 'IBM Plex Mono', monospace; font-size: 9px; fill: var(--dim); }
+
+.gridHex {
+  fill: none;
+  stroke: #1e1e19;
+  stroke-width: 0.6;
+}
+
+.targetHex {
+  fill: rgba(232, 232, 224, 0.07);
+  stroke: #8a8a7e;
+  stroke-width: 0.8;
+  stroke-opacity: 0.55;
+}

@@ -1,0 +1,19 @@
+.main { max-width: 760px; padding: 28px; }
+
+.intro { color: var(--dim); line-height: 1.7; margin-bottom: 20px; }
+.intro strong { color: var(--text); }
+.intro code { color: var(--lime); font-size: 12px; }
+
+.confirmPanel { border-color: var(--lime); }
+.confirmPanel p { color: var(--text); line-height: 1.7; margin-bottom: 16px; }
+
+.confirmRow { display: flex; gap: 10px; }
+.go { background: var(--lime); color: #0a0a08; border-color: var(--lime); }
+.go:hover { filter: brightness(1.1); color: #0a0a08; }
+
+.error { color: var(--red); margin-top: 10px; }
+
+.done { margin-top: 10px; line-height: 1.7; }
+.done .dir { color: var(--lime); font-size: 11px; word-break: break-all; }
+
+.prevSection { padding: 22px 0; }

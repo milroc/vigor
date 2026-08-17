@@ -1,0 +1,199 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import s from './LineChart.module.css';
+
+const W = 640, H = 180, PAD = { l: 44, r: 10, t: 10, b: 20 };
+
+// seriesList: [{ samples: [{t, v}], opacity?, width? }] — all on one axis.
+// Single-series callers pass seriesList={[{samples}]}. t may be seconds or a
+// normalized phase position; xLabel labels the right edge either way.
+// Pointy-top hex binning in pixel space; density → fill opacity.
+function hexBins(points, x, y, r) {
+  const colW = r * Math.sqrt(3), rowH = r * 1.5;
+  const bins = new Map();
+  for (const p of points) {
+    const py = y(p.v), row = Math.round(py / rowH);
+    const off = row % 2 ? colW / 2 : 0;
+    const col = Math.round((x(p.t) - off) / colW);
+    const key = `${row}:${col}`;
+    bins.set(key, (bins.get(key) || 0) + 1);
+  }
+  const out = [];
+  for (const [key, count] of bins) {
+    const [row, col] = key.split(':').map(Number);
+    const off = row % 2 ? colW / 2 : 0;
+    out.push({ cx: col * colW + off, cy: row * rowH, count });
+  }
+  return out;
+}
+
+const hexPath = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => {
+  const a = Math.PI / 3 * i + Math.PI / 6;
+  return `${i ? 'L' : 'M'}${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+}).join('') + 'Z';
+
+const HEX_R = 6; // one lattice for everything: background grid, target zone, density
+
+// Every lattice cell whose center falls inside the plot area.
+function latticeCells(w, h) {
+  const colW = HEX_R * Math.sqrt(3), rowH = HEX_R * 1.5;
+  const cells = [];
+  for (let row = Math.ceil(PAD.t / rowH); row <= Math.floor((h - PAD.b) / rowH); row++) {
+    const off = row % 2 ? colW / 2 : 0;
+    for (let col = Math.ceil((PAD.l - off) / colW); col <= Math.floor((w - PAD.r - off) / colW); col++) {
+      cells.push({ cx: col * colW + off, cy: row * rowH });
+    }
+  }
+  return cells;
+}
+
+export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill }) {
+  // The plot renders in pixel space: the viewBox tracks the measured size of
+  // the plot container, so text never distorts when the layout stretches it.
+  const plotRef = useRef(null);
+  const [size, setSize] = useState({ w: W, h: H });
+  useEffect(() => {
+    const ro = new ResizeObserver(([e]) => {
+      const { width, height } = e.contentRect;
+      if (width && height) {
+        setSize(prev =>
+          Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1
+            ? prev : { w: width, h: height }
+        );
+      }
+    });
+    if (plotRef.current) ro.observe(plotRef.current);
+    return () => ro.disconnect();
+  }, []);
+  const { w, h } = size;
+
+  const bandPts = targetBand ? [...targetBand.lower, ...targetBand.upper] : [];
+  const all = seriesList.flatMap(x => x.samples).concat(hexPoints || []).concat(bandPts);
+  const tMin = Math.min(...all.map(p => p.t), 0);
+  const tMax = Math.max(...all.map(p => p.t));
+  let vMin = Math.min(...all.map(p => p.v));
+  let vMax = Math.max(...all.map(p => p.v));
+  if (zeroLine) { vMin = Math.min(vMin, 0); vMax = Math.max(vMax, 0); }
+  const span = vMax - vMin || 1;
+  vMin -= span * 0.08; vMax += span * 0.08;
+
+  const x = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * (w - PAD.l - PAD.r);
+  const y = v => PAD.t + (1 - (v - vMin) / (vMax - vMin)) * (h - PAD.t - PAD.b);
+  const pathOf = samples => samples.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+
+  const gridY = [vMin + (vMax - vMin) * 0.25, vMin + (vMax - vMin) * 0.5, vMin + (vMax - vMin) * 0.75];
+  const gid = `g-${title.replace(/\W/g, '')}`;
+  const fmt = v => Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(Math.abs(v) < 3 ? 2 : 1);
+  const first = seriesList[0];
+  const areaPath = fillFirst && first?.samples.length
+    ? `${pathOf(first.samples)}L${x(first.samples[first.samples.length - 1].t).toFixed(1)},${y(zeroLine ? 0 : vMin).toFixed(1)}L${x(first.samples[0].t).toFixed(1)},${y(zeroLine ? 0 : vMin).toFixed(1)}Z`
+    : null;
+
+  // The hex layer is thousands of <path> elements over tens of thousands of
+  // points — memoized so re-renders (selection, resize ticks) don't pay for
+  // re-binning unless the geometry or data actually changed.
+  const hexLayer = useMemo(() => {
+    if (!all.length || (!hexPoints && !targetBand)) return null;
+    // Single shared lattice: every cell gets a stroke. Empty cells are
+    // the faint background grid, target-zone cells get a lighter base +
+    // stroke, and density cells layer color on top — all at the same
+    // radius so the three cell classes tile seamlessly.
+    const cells = latticeCells(w, h);
+
+    const interp = (arr, t) => {
+      if (t <= arr[0].t) return arr[0].v;
+      for (let i = 1; i < arr.length; i++) {
+        if (t <= arr[i].t) {
+          const a = arr[i - 1], b = arr[i];
+          return a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t || 1));
+        }
+      }
+      return arr[arr.length - 1].v;
+    };
+    const inZone = ({ cx, cy }) => {
+      if (!targetBand) return false;
+      const t0 = targetBand.lower[0].t, t1 = targetBand.lower[targetBand.lower.length - 1].t;
+      const t = tMin + ((cx - PAD.l) / (w - PAD.l - PAD.r)) * (tMax - tMin || 1);
+      if (t < t0 || t > t1) return false;
+      const yU = y(interp(targetBand.upper, t)), yL = y(interp(targetBand.lower, t));
+      // Zero-width bands (machine setpoints) become a single hex row.
+      return cy >= Math.min(yU, yL) - 4.5 && cy <= Math.max(yU, yL) + 4.5;
+    };
+
+    const bins = hexPoints ? hexBins(hexPoints, x, y, HEX_R) : [];
+    const maxCount = Math.max(...bins.map(b => b.count), 1);
+
+    // Layered so the zone's stroke always wins on edges shared with
+    // non-zone neighbors: empty grid first, density next, zone last.
+    const zoneCells = [], gridCells = [];
+    for (const c of cells) (inZone(c) ? zoneCells : gridCells).push(c);
+
+    return (
+      <>
+        {gridCells.map((c, i) => (
+          <path key={`g${i}`} d={hexPath(c.cx, c.cy, HEX_R)} className={s.gridHex} />
+        ))}
+        {bins.map((b, i) => (
+          <path
+            key={`h${i}`}
+            d={hexPath(b.cx, b.cy, HEX_R)}
+            fill={color}
+            fillOpacity={0.05 + 0.28 * Math.pow(b.count / maxCount, 0.6)}
+            stroke="#20201b"
+            strokeWidth="0.6"
+          />
+        ))}
+        {zoneCells.map((c, i) => (
+          <path key={`z${i}`} d={hexPath(c.cx, c.cy, HEX_R)} className={s.targetHex} />
+        ))}
+      </>
+    );
+  }, [hexPoints, targetBand, w, h, tMin, tMax, vMin, vMax, color]);
+
+  if (!all.length) return null;
+
+  return (
+    <div className={s.wrap + (fill ? ` ${s.fill}` : '')}>
+      <div className={s.name}>{title}<span>{unit}</span></div>
+      <div className={s.plot} ref={plotRef}>
+      <svg className={s.svg} data-chart viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {gridY.map((g, i) => (
+          <line key={i} x1={PAD.l} x2={w - PAD.r} y1={y(g)} y2={y(g)} stroke="#23231e" strokeDasharray="3,4" />
+        ))}
+        {hexLayer}
+        {zeroLine && (
+          <line x1={PAD.l} x2={w - PAD.r} y1={y(0)} y2={y(0)} stroke={color} strokeDasharray="4,4" strokeOpacity="0.5" />
+        )}
+        {dividerT != null && (
+          <>
+            <line x1={x(dividerT)} x2={x(dividerT)} y1={PAD.t} y2={h - PAD.b} stroke={color} strokeDasharray="4,4" strokeOpacity="0.7" />
+            <text className={s.divLabel} x={x(dividerT) - 4} y={h - PAD.b + 12} textAnchor="end">Con./Ecc.</text>
+          </>
+        )}
+        {areaPath && <path d={areaPath} fill={`url(#${gid})`} />}
+        {seriesList.map((ser, i) => (
+          <path
+            key={i}
+            d={pathOf(ser.samples)}
+            fill="none"
+            stroke={ser.color ?? color}
+            strokeWidth={ser.width ?? 2}
+            strokeOpacity={ser.opacity ?? 1}
+            strokeLinejoin="round"
+          />
+        ))}
+        <text className={s.axisLabel} x={PAD.l - 6} y={y(vMax) + 8} textAnchor="end">{fmt(vMax)}</text>
+        <text className={s.axisLabel} x={PAD.l - 6} y={y((vMax + vMin) / 2) + 3} textAnchor="end">{fmt((vMax + vMin) / 2)}</text>
+        <text className={s.axisLabel} x={PAD.l - 6} y={y(vMin)} textAnchor="end">{fmt(vMin)}</text>
+        {xLabelLeft && <text className={s.axisLabel} x={PAD.l} y={h - PAD.b + 12} textAnchor="start">{xLabelLeft}</text>}
+        {xLabel && <text className={s.axisLabel} x={w - PAD.r} y={h - PAD.b + 12} textAnchor="end">{xLabel}</text>}
+      </svg>
+      </div>
+    </div>
+  );
+}

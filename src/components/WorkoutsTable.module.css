@@ -1,0 +1,15 @@
+.rowLink { cursor: pointer; }
+
+.telemDot {
+  color: var(--lime);
+  margin-left: 8px;
+  font-size: 10px;
+  text-shadow: 0 0 6px var(--lime);
+}
+
+.typeTag {
+  color: var(--lime);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}

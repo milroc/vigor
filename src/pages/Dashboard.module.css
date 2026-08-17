@@ -1,0 +1,17 @@
+.dashboard {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1px;
+  background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 900px) { .dashboard { grid-template-columns: 1fr; } }
+
+.col { display: flex; flex-direction: column; gap: 1px; background: var(--line); }
+
+.log {
+  padding: 10px 28px; font-size: 11px; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.log.err { color: var(--red); }
+.log::before { content: '> '; color: var(--lime); }

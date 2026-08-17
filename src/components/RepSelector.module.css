@@ -1,0 +1,85 @@
+.wrap {
+  border: 1px solid var(--line); background: var(--panel);
+  padding: 12px; margin-bottom: 18px;
+}
+
+.title {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 10px;
+}
+.title span { color: #fff; }
+
+.cal { display: block; width: 100%; height: auto; margin-bottom: 4px; }
+
+.monthLabel {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 6px; fill: #8a8a7e; letter-spacing: 0.5px;
+}
+
+.cell { cursor: pointer; }
+.cell:not(.cellEmpty):hover { stroke: var(--lime); stroke-width: 1; }
+.cellEmpty { fill: #16160f; cursor: default; }
+.lvl1 { fill: rgba(198, 254, 40, 0.22); }
+.lvl2 { fill: rgba(198, 254, 40, 0.45); }
+.lvl3 { fill: rgba(198, 254, 40, 0.7); }
+.lvl4 { fill: var(--lime); }
+.cellSel { stroke: #fff; stroke-width: 1.2; }
+
+.calScale {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 9px; color: var(--dim); letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.calScale i { width: 8px; height: 8px; display: inline-block; border-radius: 1px; }
+
+.setList { display: flex; flex-direction: column; gap: 8px; }
+
+.setRow { display: flex; align-items: flex-start; gap: 8px; }
+.setLabel {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--dim); min-width: 44px; padding: 5px 0 0; white-space: nowrap;
+  background: none; border: none; text-align: left; cursor: pointer;
+  transition: color 0.1s;
+}
+.setLabel:hover { color: var(--lime); }
+.setSel { color: var(--lime); }
+.repChips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip {
+  width: 20px; height: 20px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px; font-weight: 700;
+  background: var(--bg); color: var(--dim);
+  border: 1px solid var(--line);
+  cursor: pointer; padding: 0;
+  transition: border-color 0.1s, color 0.1s;
+}
+.chip:hover { border-color: var(--lime); color: var(--lime); }
+.chipSel { background: #fff; color: var(--bg); border-color: #fff; }
+
+.row { display: flex; gap: 8px; }
+
+.field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.field label {
+  font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim);
+}
+.field select {
+  width: 100%;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line);
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  padding: 7px 6px; outline: none; cursor: pointer;
+}
+.field select:focus { border-color: var(--lime); }
+.field select:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.clear {
+  margin-top: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  background: none; color: var(--dim);
+  border: 1px solid var(--line); padding: 5px 10px; cursor: pointer;
+}
+.clear:hover { color: var(--text); border-color: var(--dim); }
+
+.hint { font-size: 10px; color: var(--dim); margin-top: 8px; line-height: 1.5; }
+.hint b { color: #fff; }

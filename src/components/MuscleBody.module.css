@@ -1,0 +1,22 @@
+.wrap { display: flex; gap: 26px; align-items: flex-start; }
+
+.figure { text-align: center; }
+.chart { cursor: pointer; }
+.chart svg { display: block; width: 100%; height: auto; }
+.static { cursor: default; pointer-events: none; }
+
+.viewLabel {
+  font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim); margin-top: 6px;
+}
+
+.extraRow { display: flex; flex-direction: column; gap: 8px; }
+.extraBtn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--line); padding: 9px 12px; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.extraBtn:hover { border-color: var(--lime); color: var(--lime); }
+.extraBtn.active { border-color: var(--lime); color: var(--lime); background: rgba(198,254,40,0.08); }

@@ -1,0 +1,77 @@
+.main { max-width: 980px; padding: 28px; }
+
+.back {
+  display: inline-block; margin-bottom: 18px;
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim); text-decoration: none;
+}
+.back:hover { color: var(--lime); }
+
+.type { color: var(--lime); }
+
+.when { color: var(--dim); margin: 6px 0 22px; }
+
+.statGrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 14px 20px; margin-bottom: 28px;
+}
+.stat label {
+  display: block; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 2px; color: var(--dim); margin-bottom: 4px;
+}
+.val {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 900; font-size: 30px; line-height: 1; color: var(--text);
+}
+.val.lit { color: var(--lime); }
+.unit { font-size: 13px; font-weight: 500; color: var(--dim); margin-left: 3px; }
+
+.setBlock { margin-bottom: 10px; border: 1px solid var(--line); }
+.setBlockTelem { border-left: 3px solid var(--lime); }
+
+.setHeader {
+  width: 100%; display: flex; align-items: center; gap: 18px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  background: var(--panel); color: var(--text);
+  border: none; padding: 12px 16px; cursor: pointer; text-align: left;
+}
+.setHeader:hover { color: var(--lime); }
+.setNum {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 900; font-size: 20px; color: var(--lime); min-width: 46px;
+}
+.setMeta { color: var(--dim); }
+.setMeta strong { color: var(--text); font-weight: 500; }
+.chev { margin-left: auto; color: var(--dim); }
+
+.repsWrap { padding: 4px 16px 14px; }
+.repsNote { font-size: 10px; color: var(--dim); letter-spacing: 1px; padding: 8px 0; }
+
+.phasePull { color: var(--lime); }
+.phaseRec { color: var(--dim); }
+
+.telemBadge {
+  font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--lime); border: 1px solid var(--lime);
+  padding: 2px 8px;
+}
+
+.importRow { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+
+.targetsSection { padding: 0 0 24px; }
+.targetsRow { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.targetField { display: flex; flex-direction: column; gap: 4px; }
+.targetField span {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: var(--dim);
+}
+.targetField input {
+  width: 110px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--lime);
+  font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700;
+  padding: 8px 10px; outline: none;
+}
+.targetField input:focus { border-color: var(--lime); }
+.importMsg { font-size: 11px; color: var(--dim); }
+
+.loading { color: var(--dim); padding: 40px 0; }
+.error { color: var(--red); padding: 20px 0; }

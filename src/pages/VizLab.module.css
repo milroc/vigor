@@ -1,0 +1,102 @@
+.main { padding: 28px 28px 88px; /* bottom clears the fixed coach bar */ }
+
+.chartsRow { display: flex; gap: 26px; align-items: flex-start; }
+.chartsCol { flex: 1; min-width: 0; }
+
+.sideCol {
+  width: 320px; flex-shrink: 0;
+  position: sticky; top: 20px;
+}
+.sideCol iframe {
+  display: block; width: 100%; aspect-ratio: 16 / 9;
+  border: 1px solid var(--line); background: var(--panel);
+}
+
+.pickBlock {
+  border: 1px solid var(--line); background: var(--panel);
+  padding: 12px; margin-bottom: 18px;
+}
+.pickTitle {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 10px;
+}
+.pickTitle span { color: var(--lime); }
+.videoCaption {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--text); margin-top: 10px; line-height: 1.8;
+}
+.videoCaption span { color: var(--dim); font-weight: 400; letter-spacing: 1px; text-transform: none; }
+
+.musclesBlock {
+  border: 1px solid var(--line); background: var(--panel);
+  padding: 12px; margin-top: 18px;
+}
+.musclesTitle {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 10px;
+}
+.musclesCaption { font-size: 10px; color: var(--dim); margin-top: 8px; letter-spacing: 0.5px; }
+.mPrimary { color: var(--lime); font-weight: 700; }
+
+.intro { color: var(--dim); line-height: 1.7; margin-bottom: 18px; }
+
+.hint { color: var(--dim); line-height: 1.8; font-size: 12px; }
+
+.sourceSelect {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line);
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  padding: 7px 10px; outline: none; cursor: pointer;
+  width: 100%;
+}
+.sourceSelect:focus { border-color: var(--lime); }
+
+.armRow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.armLabel {
+  font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--dim);
+}
+.armBtn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--line); padding: 6px 14px; cursor: pointer;
+}
+.armBtn:hover { color: var(--lime); border-color: var(--lime); }
+.armSel { color: var(--lime); border-color: var(--lime); background: rgba(198, 254, 40, 0.08); }
+
+.balance { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.balLabel, .balNums {
+  font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim);
+  white-space: nowrap;
+}
+.balNums { color: var(--text); }
+.balBar { display: flex; flex: 1; min-width: 80px; height: 8px; border: 1px solid var(--line); }
+.balBar i { display: block; height: 100%; }
+.balLeft { background: #3fd8c7; }
+.balRight { background: var(--lime); }
+
+/* Fit all four charts in one viewport: the column is pinned to the screen
+   height and each chart flexes to an equal share while the sidebar scrolls. */
+@media (min-width: 981px) {
+  .fitH {
+    position: sticky; top: 12px;
+    height: calc(100vh - 145px);
+    /* Room for four charts at their 130px min plot height — on shorter
+       viewports the column outgrows the screen and scrolls instead of
+       squishing the charts further. */
+    min-height: 740px;
+    display: flex; flex-direction: column;
+  }
+  .chartStack {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  .chartStack > * { flex: 1; min-height: 0; }
+}
+
+@media (max-width: 980px) {
+  .main { padding: 16px 16px 88px; }
+  .chartsRow { flex-direction: column; }
+  .sideCol { width: 100%; position: static; }
+}

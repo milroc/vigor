@@ -1,0 +1,28 @@
+:root {
+  --lime: #c6fe28;
+  --bg: #0a0a08;
+  --panel: #111110;
+  --line: #23231e;
+  --dim: #6b6b60;
+  --text: #e8e8e0;
+  --red: #ff4d3a;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  min-height: 100vh;
+  background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(198,254,40,0.06), transparent);
+}
+
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,0.15) 2px 3px);
+  z-index: 99;
+}

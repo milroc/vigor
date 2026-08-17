@@ -1,0 +1,13 @@
+.wrap { padding: 8px 0 4px; }
+
+.legend {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 4px;
+}
+.faint { color: var(--dim); }
+.bright { color: var(--lime); font-weight: 700; }
+.gray { color: #8a8a7e; }
+.mockTag {
+  color: var(--bg); background: var(--dim);
+  font-size: 9px; font-weight: 700; padding: 1px 6px; margin-left: 2px;
+}
