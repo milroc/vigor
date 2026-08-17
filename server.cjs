@@ -297,14 +297,14 @@ const server = http.createServer((req, res) => {
       let shotDir = null, shotPath = null;
       if (typeof parsed.screenshot === 'string' && parsed.screenshot.startsWith('data:image/png;base64,')) {
         try {
-          shotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vigor-coach-chat-'));
+          shotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vigor-chat-'));
           shotPath = path.join(shotDir, 'charts.png');
           fs.writeFileSync(shotPath, Buffer.from(parsed.screenshot.slice('data:image/png;base64,'.length), 'base64'));
         } catch { shotDir = shotPath = null; }
       }
 
       const prompt = [
-        'You are a strength coach embedded in VIGOR COACH, a personal health dashboard whose Lift page controls a VOLTRA cable machine with per-rep telemetry (ROM, resistance, velocity, power).',
+        'You are a strength coach embedded in VIGOR, a personal health dashboard whose Lift page controls a VOLTRA cable machine with per-rep telemetry (ROM, resistance, velocity, power).',
         '',
         'GROUND RULES:',
         '- Everything we know is in the DATA block below. NEVER ask the user for anything already present there — read it and use it.',
@@ -395,5 +395,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`VIGOR COACH → http://${HOST}:${PORT}  (voltra: ${VOLTRA_BIN})`);
+  console.log(`VIGOR → http://${HOST}:${PORT}  (voltra: ${VOLTRA_BIN})`);
 });

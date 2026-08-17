@@ -28,7 +28,7 @@ export default function App() {
   return (
     <>
       <header className={s.header}>
-        <NavLink to="/" className={s.wordmark}>VIGOR<small>COACH</small></NavLink>
+        <NavLink to="/" className={s.wordmark}>VIGOR<small>HEALTH</small></NavLink>
         <nav className={s.nav}>
           <NavLink to="/" end className={navClass}>Lift</NavLink>
           <NavLink to="/backup" className={navClass}>Backup</NavLink>

@@ -1,4 +1,4 @@
-# VIGOR COACH
+# VIGOR
 
 A personal health dashboard. Today it centers on **Lift**, the page for a
 VOLTRA cable machine: workout history, per-rep telemetry charts, targets,
