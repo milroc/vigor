@@ -74,8 +74,8 @@
 /* Natural render is two 92px figures (188px wide, ~245px tall); scaled
    so the mini stays shorter than the title block and never sets the
    header height. */
-.bodyMiniScale { width: 34px; height: 44px; overflow: hidden; }
-.bodyMiniScale > div { transform: scale(0.18); transform-origin: top left; width: 188px; }
+.bodyMiniScale { width: 42px; height: 42px; overflow: hidden; }
+.bodyMiniScale > div { transform: scale(0.22); transform-origin: top left; width: 188px; }
 .bodyTip {
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 30;
   background: var(--bg); border: 1px solid var(--line);
