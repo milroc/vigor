@@ -34,7 +34,10 @@
   color: var(--text); margin-bottom: 6px;
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
 }
-.name > span { font-weight: 400; color: var(--dim); letter-spacing: 1px; }
+.name > span {
+  font-weight: 500; color: var(--dim);
+  letter-spacing: 0; text-transform: none;
+}
 
 .legend { display: inline-flex; gap: 10px; margin-left: auto; }
 .legendItem {
@@ -43,7 +46,11 @@
 }
 .swatch { width: 9px; height: 9px; display: inline-block; }
 
-.svg { width: 100%; height: auto; display: block; background: rgba(17, 17, 16, 0.55); }
+.svg {
+  width: 100%; height: auto; display: block;
+  border: 1px solid var(--line);
+  background: rgba(17, 17, 16, 0.6);
+}
 
 .axis {
   font-family: 'IBM Plex Mono', monospace;

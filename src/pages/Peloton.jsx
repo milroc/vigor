@@ -236,7 +236,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
           placeholder="weight lbs" title="Body weight, used only for the VO₂max estimate"
           value={weight} onChange={e => setWeight(e.target.value)}
         />
-        <button className={shared.btn} onClick={run} disabled={running}>
+        <button className={s.fitBtn} onClick={run} disabled={running}>
           {running ? 'Running…' : 'Run Analysis'}
         </button>
       </div>
