@@ -5,6 +5,7 @@ dist/
 # runtime user data written by server.cjs
 .env
 backups/
+manual/
 telemetry/
 targets.json
 
