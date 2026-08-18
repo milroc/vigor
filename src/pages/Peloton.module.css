@@ -135,6 +135,10 @@
   display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 16px 20px; align-content: start; margin-bottom: 0;
 }
+/* A/B stat values: one line each, no wrapping, so widths changing
+   during a brush drag can't reflow the tile. */
+.abVals { display: flex; flex-direction: column; gap: 1px; }
+.abVals > span { white-space: nowrap; }
 
 /* Middle row: p-ranked trend charts, two per row, height set by the
    drag divider below; overflow scrolls inside the row. */
@@ -172,7 +176,16 @@
 }
 
 .hrScrubRow { display: flex; align-items: center; gap: 12px; margin: 2px 0 8px; flex-shrink: 0; }
-.hrSlider { flex: 1; max-width: 460px; accent-color: var(--lime); }
+
+/* Full-width A/B brush rows directly under the header. */
+.brushRows { flex-shrink: 0; margin: -6px 0 8px; }
+.abTag {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px;
+  width: 14px; text-align: center; flex-shrink: 0;
+}
+/* Reserve room for the widest label (dates + 3-digit count) so the
+   brush doesn't resize while dragging. */
+.brushLabel { min-width: 232px; flex-shrink: 0; }
 
 /* Heartrates tab: the chart fills the pane instead of scrolling in it.
    The min covers scrub row + chart title + the plot's 130px floor, so

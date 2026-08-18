@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { COL_A, COL_B, COL_AB } from './DateBrush.jsx';
 import s from './ZoneDays.module.css';
 
 // Time in zone over time: one stacked bar per calendar day (Z1 bottom → Z5
@@ -12,7 +13,7 @@ export const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745
 const W = 640, H = 180, PAD = { l: 44, r: 10, t: 10, b: 20 };
 const DAY = 86_400_000;
 
-export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover, fill }) {
+export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover, fill, winA, winB }) {
   const [choice, setChoice] = useState(null);
   // Pixel-space sizing, same pattern as LineChart: the viewBox tracks the
   // measured plot size so a flex parent can stretch the chart without
@@ -119,23 +120,40 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover, fill 
         <line x1={PAD.l} x2={w - PAD.r} y1={y(0)} y2={y(0)} stroke="#23231e" />
         {days.map(d => {
           const hovered = hoverId != null && d.sessions.some(sess => sess.id === hoverId);
+          // A/B window membership: member days keep full color and get a
+          // colored marker under the axis, the rest fade back.
+          const t = Date.parse(d.day);
+          const anyWin = !!(winA || winB);
+          const inA = winA && t >= winA[0] && t <= winA[1];
+          const inB = winB && t >= winB[0] && t <= winB[1];
+          const dim = anyWin && !inA && !inB;
           let acc = 0;
-          return d.mins.map((m, z) => {
-            if (m <= 0) return null;
-            const yTop = y(acc + m), yBot = y(acc);
-            acc += m;
-            return (
-              <rect
-                key={`${d.day}:${z}`}
-                x={x(d.day) - barW / 2} y={yTop}
-                width={barW} height={Math.max(yBot - yTop, 0.5)}
-                fill={ZONE_COLORS[z]} fillOpacity={hovered ? 1 : 0.9}
-                stroke={hovered ? '#e8e8e0' : 'none'} strokeWidth={hovered ? 1 : 0}
-              >
-                <title>{d.day} · {Math.round(d.total)} min</title>
-              </rect>
-            );
-          });
+          return (
+            <g key={d.day}>
+              {d.mins.map((m, z) => {
+                if (m <= 0) return null;
+                const yTop = y(acc + m), yBot = y(acc);
+                acc += m;
+                return (
+                  <rect
+                    key={`${d.day}:${z}`}
+                    x={x(d.day) - barW / 2} y={yTop}
+                    width={barW} height={Math.max(yBot - yTop, 0.5)}
+                    fill={ZONE_COLORS[z]} fillOpacity={hovered ? 1 : dim ? 0.25 : 0.9}
+                    stroke={hovered ? '#e8e8e0' : 'none'} strokeWidth={hovered ? 1 : 0}
+                  >
+                    <title>{d.day} · {Math.round(d.total)} min</title>
+                  </rect>
+                );
+              })}
+              {(inA || inB) && (
+                <rect
+                  x={x(d.day) - barW / 2} y={y(0) + 2} width={barW} height={2.5}
+                  fill={inA && inB ? COL_AB : inA ? COL_A : COL_B}
+                />
+              )}
+            </g>
+          );
         })}
         <text className={s.axis} x={PAD.l} y={h - 4} textAnchor="start">{days[0].day}</text>
         <text className={s.axis} x={w - PAD.r} y={h - 4} textAnchor="end">

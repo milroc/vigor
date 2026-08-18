@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness, getProfile } from '../api.js';
-import DateBrush from '../components/DateBrush.jsx';
+import DateBrush, { COL_A, COL_B, COL_AB } from '../components/DateBrush.jsx';
 import LineChart from '../components/LineChart.jsx';
 import { MuscleHighlight } from '../components/MuscleBody.jsx';
 import Splom from '../components/Splom.jsx';
@@ -26,6 +26,11 @@ const fmtLen = secs => {
 };
 const fmtDay = iso => iso ? new Date(iso).toLocaleDateString(undefined,
   { year: '2-digit', month: 'short', day: 'numeric' }) : '—';
+// Fixed-width variant (MMM DD, YY) for live-updating labels: constant
+// character count in the mono font, so dragging a brush never reflows
+// the row.
+const fmtDay2 = iso => iso ? new Date(iso).toLocaleDateString(undefined,
+  { year: '2-digit', month: 'short', day: '2-digit' }) : '—';
 // Older backups prefixed summary slugs with total_.
 const summary = (w, key) => w[key] ?? w[`total_${key}`] ?? null;
 // Freestyle "Just Workout" rows carry the uppercased title as the instructor.
@@ -58,6 +63,10 @@ const DAY = 86_400_000;
 
 // Below any living resting HR — strap dropout noise, treated as missing.
 const HR_FLOOR = 30;
+
+const tsOf = r => new Date(r.start).getTime();
+// A/B window membership: win is [fromMs, toMs] or null.
+const within = (win, t) => !!win && t >= win[0] && t <= win[1];
 
 // Peloton's zone boundaries as fractions of max HR: Z1 <65%, Z2 65-75%,
 // Z3 75-85%, Z4 85-95%, Z5 95%+.
@@ -104,8 +113,12 @@ const CUSTOM_SETS = {
 // Raw per-ride cardio analysis — every ride is its own data point, no
 // monthly averaging. Trend comes from a least-squares fit over the points.
 function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header, workouts, selectedId }) {
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  // Global A/B compare windows ([fromMs, toMs] or null) — they replace
+  // the old from/to date inputs and thread through every component:
+  // stats, charts, zone days, heartrates, SPLOM, and the table.
+  // Default: neither selected.
+  const [winA, setWinA] = useState(null);
+  const [winB, setWinB] = useState(null);
   // Weight/age/sex come from manual/profile.json — no inputs; they feed
   // the VO2max conversion and target bands only.
   const [profile, setProfile] = useState({});
@@ -121,9 +134,8 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
 
   // Bottom pane tab: the workout table or the correlation matrix.
   const [tab, setTab] = useState('table');
-  // Heartrates tab brush window: [fromMs, toMs] over workout start dates
-  // (null = default, the last month).
-  const [hrRange, setHrRange] = useState(null);
+  // Normalize each trace by its concurrent workload (bpm per watt/mph).
+  const [hrNorm, setHrNorm] = useState(false);
   // Chart-area height, adjustable by dragging the divider above the tabs.
   // Starts proportional to the viewport so the bottom pane is visible on
   // any desktop size.
@@ -174,7 +186,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
       setRunning(true);
       setError(null);
       const set = CUSTOM_SETS[selection];
-      const base = { from, to, weightLbs: profile.weightLbs ?? '' };
+      const base = { weightLbs: profile.weightLbs ?? '' };
       try {
         const data = await getPelotonFitness(current.dir, set
           ? {
@@ -194,16 +206,20 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [current, selection, from, to, profile]);
+  }, [current, selection, profile]);
 
-  const analysis = useMemo(() => {
-    // Heart rate is the only hard requirement; workload metrics (EF, VO2,
-    // HR@100W) appear when the discipline records a workload.
-    const rides = (result?.rides || []).filter(r => r.avgHr != null);
-    if (rides.length < 3) return null;
+  // Heart rate is the only hard requirement; workload metrics (EF, VO2,
+  // HR@100W) appear when the discipline records a workload. `filter`
+  // restricts the rides to a date window; tagA/tagB color the scatter
+  // points by A/B window membership.
+  const analyzeRides = (filter, tagA, tagB) => {
+    const rides = (result?.rides || []).filter(r =>
+      r.avgHr != null && (!filter || filter(tsOf(r))));
+    if (!rides.length) return null;
     const workloadKey = result.workloadKey;
-    const t0 = new Date(rides[0].start).getTime();
-    const tOf = r => (new Date(r.start).getTime() - t0) / DAY;
+    const tagging = !!(tagA || tagB);
+    const t0 = tsOf(rides[0]);
+    const tOf = r => (tsOf(r) - t0) / DAY;
     const tMax = tOf(rides[rides.length - 1]);
     const mean = a => a.reduce((sum, v) => sum + v, 0) / a.length;
 
@@ -211,7 +227,17 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
     // carries its workout id so charts can open the workout on click.
     const scatter = key => {
       const pts = rides
-        .map(r => ({ t: tOf(r), v: r[key], id: r.id, dateLabel: String(r.start).slice(0, 10) }))
+        .map(r => {
+          const t = tsOf(r);
+          const a = within(tagA, t), b = within(tagB, t);
+          return {
+            t: tOf(r), v: r[key], id: r.id, dateLabel: String(r.start).slice(0, 10),
+            ...(tagging ? {
+              color: a && b ? COL_AB : a ? COL_A : b ? COL_B : undefined,
+              opacity: a || b ? 0.95 : 0.2,
+            } : {}),
+          };
+        })
         .filter(p => p.v != null);
       if (pts.length < 3) return null;
       const mx = mean(pts.map(p => p.t)), my = mean(pts.map(p => p.v));
@@ -279,7 +305,48 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
       tipT: t => new Date(t0 + t * DAY).toLocaleDateString(undefined,
         { month: 'short', day: 'numeric', year: '2-digit' }),
     };
-  }, [result]);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const analysisFull = useMemo(() => analyzeRides(null, winA, winB), [result, winA, winB]);
+  // The main UI (charts, zone days, tabs) needs enough points to trend.
+  const analysis = analysisFull && analysisFull.rides.length >= 3 ? analysisFull : null;
+  // Per-window analyses drive the A/B topline numbers.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const statsA = useMemo(() => (winA ? analyzeRides(t => within(winA, t)) : null), [result, winA]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const statsB = useMemo(() => (winB ? analyzeRides(t => within(winB, t)) : null), [result, winB]);
+  const anyWin = !!(winA || winB);
+
+  // Brush domain: every workout in the current selection, date-sorted.
+  const rideTs = useMemo(() => (result?.rides || []).map(tsOf), [result]);
+  const dMin = rideTs[0], dMax = rideTs[rideTs.length - 1];
+  // Chips activate/clear a window; A defaults to the month before B's.
+  const toggleA = () => setWinA(w => w ? null
+    : [Math.max(dMin, dMax - 60 * DAY), Math.max(dMin, dMax - 30 * DAY)]);
+  const toggleB = () => setWinB(w => w ? null : [Math.max(dMin, dMax - 30 * DAY), dMax]);
+  // Windows persist across selection changes; clamp them to the current
+  // date domain for display and membership.
+  const clampWin = w => {
+    if (!w || !rideTs.length) return w;
+    const lo = Math.max(dMin, Math.min(dMax, w[0]));
+    return [lo, Math.max(lo, Math.min(dMax, w[1]))];
+  };
+  const wA = clampWin(winA), wB = clampWin(winB);
+
+  // Topline values adapt to the windows: colored A/B values replace the
+  // overall number while either window is active. Stacked one per line
+  // so changing digit counts during a brush drag never rewraps the tile
+  // (which would jitter the whole top grid).
+  const ab = get => {
+    if (!anyWin) return analysis ? get(analysis) : null;
+    return (
+      <span className={s.abVals}>
+        {winA && <span style={{ color: COL_A }}>{(statsA && get(statsA)) ?? '—'}</span>}
+        {winB && <span style={{ color: COL_B }}>{(statsB && get(statsB)) ?? '—'}</span>}
+      </span>
+    );
+  };
 
   // Charts ranked by trend significance — smallest p first — and laid out
   // two per row.
@@ -349,12 +416,48 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
             {options.titles.map(([t, n]) => <option key={t} value={t}>{t} · {n}</option>)}
           </optgroup>
         </select>
-        <input className={s.fitInput} type="date" value={from} onChange={e => setFrom(e.target.value)} />
-        <span className={s.fitDash}>→</span>
-        <input className={s.fitInput} type="date" value={to} onChange={e => setTo(e.target.value)} />
+        <button
+          className={s.chip + (winA ? ` ${s.chipActive}` : '')}
+          style={winA ? { borderColor: COL_A, color: COL_A } : undefined}
+          onClick={toggleA} disabled={!rideTs.length}
+          title="toggle compare window A"
+        >
+          A
+        </button>
+        <button
+          className={s.chip + (winB ? ` ${s.chipActive}` : '')}
+          style={winB ? { borderColor: COL_B, color: COL_B } : undefined}
+          onClick={toggleB} disabled={!rideTs.length}
+          title="toggle compare window B"
+        >
+          B
+        </button>
         {running && <span className={s.fitDash}>updating…</span>}
         </div>
       </div>
+
+      {anyWin && (
+        <div className={s.brushRows}>
+          {wA && (
+            <div className={s.hrScrubRow}>
+              <span className={s.abTag} style={{ color: COL_A }}>A</span>
+              <DateBrush dates={rideTs} value={wA} onChange={setWinA} color={COL_A} height={30} />
+              <span className={`${s.fitDash} ${s.brushLabel}`} style={{ color: COL_A }}>
+                {fmtDay2(wA[0])} → {fmtDay2(wA[1])} · {rideTs.filter(t => within(wA, t)).length}
+              </span>
+            </div>
+          )}
+          {wB && (
+            <div className={s.hrScrubRow}>
+              <span className={s.abTag} style={{ color: COL_B }}>B</span>
+              <DateBrush dates={rideTs} value={wB} onChange={setWinB} color={COL_B} height={30} />
+              <span className={`${s.fitDash} ${s.brushLabel}`} style={{ color: COL_B }}>
+                {fmtDay2(wB[0])} → {fmtDay2(wB[1])} · {rideTs.filter(t => within(wB, t)).length}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <div className={s.error}>analysis failed: {error}</div>}
       {result && !analysis && (
@@ -372,48 +475,52 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
               Everything else (per-metric fits, p-values) lives on the
               ranked charts below. */}
           <div className={s.stats}>
-            <Stat label="workouts" value={analysis.rides.length} />
-            <Stat label="span" value={analysis.spanDays} unit="days" />
+            <Stat label="workouts" value={ab(a => a.rides.length)} />
+            <Stat label="span" value={ab(a => a.spanDays)} unit="days" />
             {analysis.efSeries && (
               <>
                 <Stat
                   label="EF trend"
-                  value={`${analysis.slopePerMonth >= 0 ? '+' : ''}${analysis.slopePerMonth.toFixed(1)}%`}
-                  unit={`/month · ${fmtP(analysis.efP)}`}
+                  value={ab(a => a.slopePerMonth != null
+                    ? `${a.slopePerMonth >= 0 ? '+' : ''}${a.slopePerMonth.toFixed(1)}%` : null)}
+                  unit={anyWin ? '/month' : `/month · ${fmtP(analysis.efP)}`}
                 />
                 <Stat
                   label="EF total"
-                  value={`${analysis.efTotalPct >= 0 ? '+' : ''}${analysis.efTotalPct.toFixed(1)}%`}
+                  value={ab(a => a.efTotalPct != null
+                    ? `${a.efTotalPct >= 0 ? '+' : ''}${a.efTotalPct.toFixed(1)}%` : null)}
                 />
               </>
             )}
             {!analysis.efSeries && analysis.intensitySeries && (
               <Stat
                 label="intensity fit (%HRmax)"
-                value={`${analysis.intensityFitStart.toFixed(0)}% → ${analysis.intensityFitEnd.toFixed(0)}%`}
-                unit={fmtP(analysis.intensityP)}
+                value={ab(a => a.intensityFitStart != null
+                  ? `${a.intensityFitStart.toFixed(0)}% → ${a.intensityFitEnd.toFixed(0)}%` : null)}
+                unit={anyWin ? undefined : fmtP(analysis.intensityP)}
               />
             )}
             {analysis.vo2Series && analysis.vo2InMlKg && (
               <Stat
                 label="est. VO₂max"
-                value={`${analysis.vo2FitStart.toFixed(1)} → ${analysis.vo2FitEnd.toFixed(1)}`}
+                value={ab(a => a.vo2InMlKg && a.vo2FitStart != null
+                  ? `${a.vo2FitStart.toFixed(1)} → ${a.vo2FitEnd.toFixed(1)}` : null)}
                 unit="ml/kg/min"
               />
             )}
             <Stat
               label="distance"
-              value={analysis.totalDistance ? analysis.totalDistance.toFixed(1) : null}
+              value={ab(a => a.totalDistance ? a.totalDistance.toFixed(1) : null)}
               unit="mi"
             />
             <Stat
               label="calories"
-              value={analysis.totalCalories ? analysis.totalCalories.toLocaleString() : null}
+              value={ab(a => a.totalCalories ? a.totalCalories.toLocaleString() : null)}
               unit="kcal"
             />
           </div>
           <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout}
-            hoverId={hoverId} onHover={onHoverPoint} fill />
+            hoverId={hoverId} onHover={onHoverPoint} fill winA={wA} winB={wB} />
           </div>
           <div className={s.chartsScroll} style={{ height: chartsH }}>
             <div className={s.chartGrid}>
@@ -472,20 +579,31 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
           // Every selected workout's HR trace start→finish on one time
           // axis over the zone bands (same metaphor as the workout modal).
           // The date scrubber picks a from→to window; traces inside it
-          // draw at 0.8, the rest fade to 0.2. Defaults to the last month.
-          const withHr = analysis.rides.filter(r => r.hr?.length > 1);
+          // draw at 0.8, the rest fade out. Defaults to the last month.
+          // The ÷ toggle divides HR by the concurrent workload so a
+          // fitter ride reads as a lower line at equal effort.
+          const speed = analysis.workloadKey && analysis.workloadKey !== 'output';
+          const hasOut = analysis.rides.some(r => r.out?.length > 1);
+          const norm = hrNorm && hasOut;
+          const withHr = analysis.rides.filter(r =>
+            r.hr?.length > 1 && (!norm || r.out?.length > 1));
           if (!withHr.length) {
             return <p className={s.intro}>No heart-rate traces in this selection.</p>;
           }
-          const n = withHr.length;
-          const dates = withHr.map(r => new Date(r.start).getTime());
-          const dMin = dates[0], dMax = dates[n - 1];
-          const raw = hrRange ?? [Math.max(dMin, dMax - 30 * DAY), dMax];
-          const lo = Math.max(dMin, Math.min(dMax, raw[0]));
-          const hi = Math.max(lo, Math.min(dMax, raw[1]));
-          const inSel = i => dates[i] >= lo && dates[i] <= hi;
-          const selCount = dates.filter(t => t >= lo && t <= hi).length;
-          const trace = r => r.hr.map(([t, v]) => ({ t, v }));
+          const dates = withHr.map(tsOf);
+          const inA = i => within(wA, dates[i]);
+          const inB = i => within(wB, dates[i]);
+          // Coasting near zero workload makes the ratio explode; require a
+          // meaningful denominator (30 W, or any real speed).
+          const wlFloor = speed ? 1 : 30;
+          const trace = r => {
+            if (!norm) return r.hr.map(([t, v]) => ({ t, v }));
+            const out = new Map(r.out);
+            return r.hr.map(([t, v]) => {
+              const o = out.get(t);
+              return { t, v: o >= wlFloor ? v / o : null };
+            });
+          };
           const bands = analysis.hrMax
             ? ZONE_COLORS.map((c, z) => ({
               from: ZONE_EDGES[z] * analysis.hrMax,
@@ -496,25 +614,38 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
             : undefined;
           return (
             <>
-              <div className={s.hrScrubRow}>
-                <DateBrush dates={dates} value={[lo, hi]} onChange={setHrRange} />
-                <span className={s.fitDash}>
-                  {fmtDay(lo)} → {fmtDay(hi)} · {selCount} of {n}
-                </span>
-              </div>
+              {hasOut && (
+                <div className={s.hrScrubRow}>
+                  <button
+                    className={s.chip + (norm ? ` ${s.chipActive}` : '')}
+                    onClick={() => setHrNorm(v => !v)}
+                    title="divide each trace by its concurrent workload"
+                  >
+                    ÷ {speed ? 'speed' : 'output'}
+                  </button>
+                </div>
+              )}
               <LineChart
-                title="Heart Rate"
-                unit={`BPM · every workout start → finish · zones vs HRmax ${analysis.hrMax ?? '?'} · scrub a date window`}
-                seriesList={[
-                  ...withHr.filter((r, i) => !inSel(i)).map(r => ({
-                    samples: trace(r), opacity: 0.2, width: 1,
-                  })),
-                  ...withHr.filter((r, i) => inSel(i)).map(r => ({
-                    samples: trace(r), opacity: 0.8, width: 1.4,
-                  })),
-                ]}
+                title={norm ? 'Heart Rate per Workload' : 'Heart Rate'}
+                unit={(norm
+                  ? `BPM/${speed ? 'MPH' : 'W'} · HR ÷ concurrent workload · lower = more efficient`
+                  : `BPM · every workout start → finish · zones vs HRmax ${analysis.hrMax ?? '?'}`)
+                  + (anyWin ? ' · colored by A/B window' : '')}
+                seriesList={anyWin
+                  ? [
+                    ...withHr.filter((r, i) => !inA(i) && !inB(i)).map(r => ({
+                      samples: trace(r), opacity: 0.01, width: 1,
+                    })),
+                    ...withHr.filter((r, i) => inA(i)).map(r => ({
+                      samples: trace(r), color: COL_A, opacity: 0.65, width: 1.4,
+                    })),
+                    ...withHr.filter((r, i) => inB(i)).map(r => ({
+                      samples: trace(r), color: COL_B, opacity: 0.65, width: 1.4,
+                    })),
+                  ]
+                  : withHr.map(r => ({ samples: trace(r), opacity: 0.4, width: 1 }))}
                 color="#e8e8e0"
-                bands={bands}
+                bands={norm ? undefined : bands}
                 fill
                 xLabelLeft="0:00"
                 xLabel={fmtZone(Math.max(...withHr.map(r => r.hr[r.hr.length - 1][0])))}
@@ -528,6 +659,14 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
           data={analysis.rides}
           onPointClick={r => onOpenWorkout(r.id)}
           hoverId={hoverId} onHover={onHoverPoint}
+          pointStyle={anyWin ? r => {
+            const t = tsOf(r);
+            const a = within(wA, t), b = within(wB, t);
+            return {
+              color: a && b ? COL_AB : a ? COL_A : b ? COL_B : '#c6fe28',
+              opacity: a || b ? 0.9 : 0.12,
+            };
+          } : undefined}
           fields={[
             { key: 'ef', label: 'EF' },
             { key: 'avgOutput', label: 'Avg W' },
@@ -550,10 +689,18 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
               </tr>
             </thead>
             <tbody>
-              {workouts.map(w => (
+              {workouts.map(w => {
+                const t = tsOf(w);
+                const a = within(wA, t), b = within(wB, t);
+                const mark = a && b ? COL_AB : a ? COL_A : b ? COL_B : null;
+                return (
                 <tr
                   key={w.id}
                   className={s.row + (selectedId === w.id ? ` ${s.rowActive}` : '')}
+                  style={anyWin ? {
+                    boxShadow: mark ? `inset 3px 0 0 ${mark}` : undefined,
+                    opacity: mark ? 1 : 0.4,
+                  } : undefined}
                   onClick={() => onOpenWorkout(w.id)}
                 >
                   <td>{fmtDay(w.start)}</td>
@@ -565,7 +712,8 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
                   <td className={shared.num}>{summary(w, 'calories') ?? '—'}</td>
                   <td className={shared.num}>{w.avg_heart_rate ?? '—'}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {!workouts.length && <p className={s.intro}>No workouts match this filter.</p>}

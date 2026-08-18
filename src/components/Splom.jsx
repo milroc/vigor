@@ -6,7 +6,9 @@ const CELL = 108, GAP = 8, PAD = 6;
 // Scatterplot matrix: every pairwise combination of `fields` over `data`.
 // Points brighten with data order, so on date-sorted rows the newest points
 // stand out and drift across each cell as the metrics change together.
-export default function Splom({ data, fields, color = '#c6fe28', onPointClick, hoverId, onHover }) {
+// pointStyle(d, k) -> { color, opacity } overrides that encoding (e.g. for
+// A/B window membership).
+export default function Splom({ data, fields, color = '#c6fe28', onPointClick, hoverId, onHover, pointStyle }) {
   const n = fields.length;
   const size = n * CELL + (n - 1) * GAP;
 
@@ -75,14 +77,16 @@ export default function Splom({ data, fields, color = '#c6fe28', onPointClick, h
               <rect x={x0} y={y0} width={CELL} height={CELL} className={s.cell} />
               {pts.map(p => {
                 const hovered = hoverId != null && data[p.k].id === hoverId;
+                const style = pointStyle?.(data[p.k], p.k);
                 return (
                   <circle
                     key={p.k}
                     cx={p.ax}
                     cy={p.ay}
                     r={hovered ? 3.4 : 2.2}
-                    fill={color}
-                    fillOpacity={hovered ? 1 : 0.2 + 0.7 * (p.k / (data.length - 1 || 1))}
+                    fill={style?.color ?? color}
+                    fillOpacity={hovered ? 1
+                      : style?.opacity ?? (0.2 + 0.7 * (p.k / (data.length - 1 || 1)))}
                     stroke={hovered ? '#e8e8e0' : 'none'}
                     strokeWidth={hovered ? 1 : 0}
                   />
@@ -101,7 +105,9 @@ export default function Splom({ data, fields, color = '#c6fe28', onPointClick, h
           );
         }))}
       </svg>
-      <div className={s.caption}>rows = y · columns = x · brighter dots = more recent</div>
+      <div className={s.caption}>
+        rows = y · columns = x · {pointStyle ? 'colors = A/B window' : 'brighter dots = more recent'}
+      </div>
     </div>
   );
 }

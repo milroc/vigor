@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import s from './DateBrush.module.css';
 
-// d3-brush-style date scrubber: one tick per item on a true time axis,
-// with a lime brush window. Drag inside the window to move it, drag an
-// edge to resize, drag on empty track to draw a fresh window.
-const H = 44, PAD = { l: 44, r: 10 }, GRIP = 6;
+// Opposing window colors for the A/B compare selectors, shared by every
+// component that renders membership.
+export const COL_A = '#4da3ff', COL_B = '#ff9d4d';
+// Points/days inside both windows show as lime.
+export const COL_AB = '#c6fe28';
 
-export default function DateBrush({ dates, value, onChange }) {
+// d3-brush-style date scrubber: one tick per item on a true time axis,
+// with a brush window. Drag inside the window to move it, drag an edge
+// to resize, drag on empty track to draw a fresh window.
+const PAD = { l: 44, r: 10 }, GRIP = 6;
+
+export default function DateBrush({ dates, value, onChange, color = '#c6fe28', height = 44 }) {
+  const H = height;
   const ref = useRef(null);
   const [w, setW] = useState(640);
   useEffect(() => {
@@ -61,8 +68,9 @@ export default function DateBrush({ dates, value, onChange }) {
   const onUp = () => { drag.current = null; };
 
   const xLo = x(lo), xHi = x(hi);
+  const m = Math.min(6, Math.round(H * 0.15));
   return (
-    <div className={s.wrap} ref={ref}>
+    <div className={s.wrap} ref={ref} style={{ height }}>
       <svg
         className={s.svg} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
         onPointerDown={onDown} onPointerMove={onMove}
@@ -74,14 +82,15 @@ export default function DateBrush({ dates, value, onChange }) {
           const sel = t >= lo && t <= hi;
           return (
             <line
-              key={i} x1={x(t)} x2={x(t)} y1={13} y2={H - 13}
+              key={i} x1={x(t)} x2={x(t)} y1={H * 0.3} y2={H * 0.7}
               stroke={sel ? '#e8e8e0' : '#6b6b60'} strokeOpacity={sel ? 0.9 : 0.45}
             />
           );
         })}
         <rect
           className={s.window}
-          x={xLo} y={6} width={Math.max(xHi - xLo, 1)} height={H - 12}
+          style={{ stroke: color, fill: color, fillOpacity: 0.1, strokeOpacity: 0.7 }}
+          x={xLo} y={m} width={Math.max(xHi - xLo, 1)} height={H - 2 * m}
         />
         <rect className={s.grip} x={xLo - GRIP} y={0} width={GRIP * 2} height={H} />
         <rect className={s.grip} x={xHi - GRIP} y={0} width={GRIP * 2} height={H} />

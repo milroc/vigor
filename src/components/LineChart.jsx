@@ -293,7 +293,10 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
         {seriesList.map((ser, i) => ser.dots ? (
           <g key={i} fill={ser.color ?? color} fillOpacity={ser.opacity ?? 0.8}>
             {ser.samples.map((p, j) => p.v == null ? null : (
-              <circle key={j} cx={x(p.t)} cy={y(p.v)} r={ser.r ?? 3} />
+              <circle
+                key={j} cx={x(p.t)} cy={y(p.v)} r={ser.r ?? 3}
+                fill={p.color} fillOpacity={p.opacity}
+              />
             ))}
           </g>
         ) : (
