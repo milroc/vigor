@@ -3,7 +3,7 @@ import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness } from '../api
 import LineChart from '../components/LineChart.jsx';
 import { MuscleHighlight } from '../components/MuscleBody.jsx';
 import Splom from '../components/Splom.jsx';
-import ZoneRows from '../components/ZoneRows.jsx';
+import ZoneDays from '../components/ZoneDays.jsx';
 import { regIncBeta, fmtP } from '../lib/stats.js';
 import shared from '../styles/shared.module.css';
 import s from './Peloton.module.css';
@@ -347,7 +347,7 @@ function FitnessPanel({ current, discipline }) {
                 xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
               />
             )}
-            <ZoneRows rides={analysis.rides} xLeft={analysis.xLeft} xRight={analysis.xRight} />
+            <ZoneDays rides={analysis.rides} />
             {analysis.vo2Series && (
               <LineChart
                 title={analysis.vo2InMlKg ? 'Estimated VO₂max' : 'Estimated Max Aerobic Power'}
