@@ -121,6 +121,9 @@
 
 .fitness { margin: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .fitControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+/* Chips sharing the control row match the select's height so the row
+   reads as one bar. */
+.fitControls .chip { padding: 0 14px; height: 39px; }
 
 /* Top row: topline metrics beside the time-in-zone chart, which stretches
    to whatever height the metrics need (its plot has its own minHeight).
