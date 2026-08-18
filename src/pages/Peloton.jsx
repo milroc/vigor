@@ -526,10 +526,15 @@ export default function Peloton() {
     if (!selected) return;
     const onKey = e => { if (e.key === 'Escape') select(null); };
     window.addEventListener('keydown', onKey);
+    // Locking scroll removes the page scrollbar; pad by its width so the
+    // content doesn't shift sideways while the modal is open.
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = 'hidden';
+    if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
