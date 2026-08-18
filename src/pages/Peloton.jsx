@@ -136,30 +136,39 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
     };
   }, [current]);
 
-  useEffect(() => { setResult(null); }, [selection, current]);
-
-  const run = async () => {
-    setRunning(true);
-    setError(null);
-    const set = CUSTOM_SETS[selection];
-    const base = { from, to, weightLbs: profile.weightLbs ?? '' };
-    try {
-      setResult(await getPelotonFitness(current.dir, set
-        ? {
-          ...base,
-          disciplines: set.disciplines.join(','),
-          minSecs: set.minSecs, maxSecs: set.maxSecs,
-          mergeGapMins: set.mergeGapMins,
-        }
-        : selection.startsWith('disc:')
-          ? { ...base, discipline: selection.slice(5) }
-          : { ...base, title: selection }));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setRunning(false);
-    }
-  };
+  // The analysis runs in ~150ms, so it re-runs automatically on any input
+  // change — debounced for date typing, sequence-guarded against
+  // out-of-order responses. The previous result stays up while the next
+  // one loads.
+  const seqRef = useRef(0);
+  useEffect(() => {
+    if (!current) return;
+    const seq = ++seqRef.current;
+    const timer = setTimeout(async () => {
+      setRunning(true);
+      setError(null);
+      const set = CUSTOM_SETS[selection];
+      const base = { from, to, weightLbs: profile.weightLbs ?? '' };
+      try {
+        const data = await getPelotonFitness(current.dir, set
+          ? {
+            ...base,
+            disciplines: set.disciplines.join(','),
+            minSecs: set.minSecs, maxSecs: set.maxSecs,
+            mergeGapMins: set.mergeGapMins,
+          }
+          : selection.startsWith('disc:')
+            ? { ...base, discipline: selection.slice(5) }
+            : { ...base, title: selection });
+        if (seqRef.current === seq) setResult(data);
+      } catch (e) {
+        if (seqRef.current === seq) setError(e.message);
+      } finally {
+        if (seqRef.current === seq) setRunning(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [current, selection, from, to, profile]);
 
   const analysis = useMemo(() => {
     // Heart rate is the only hard requirement; workload metrics (EF, VO2,
@@ -269,9 +278,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
         <input className={s.fitInput} type="date" value={from} onChange={e => setFrom(e.target.value)} />
         <span className={s.fitDash}>→</span>
         <input className={s.fitInput} type="date" value={to} onChange={e => setTo(e.target.value)} />
-        <button className={s.fitBtn} onClick={run} disabled={running}>
-          {running ? 'Running…' : 'Run Analysis'}
-        </button>
+        {running && <span className={s.fitDash}>updating…</span>}
       </div>
 
       {error && <div className={s.error}>analysis failed: {error}</div>}
