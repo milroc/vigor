@@ -102,4 +102,24 @@ for (const p of buckets.partial) console.log('  ', p);
 console.log(`missing from this account: ${buckets.missing.length}`);
 for (const m of buckets.missing) console.log('  ', m);
 console.log(`before account history: ${buckets.preAccount.length}`);
-if (manual.incomplete) console.log(`\nnote: ${manual.incomplete}`);
+
+// Reverse check: trainer-band recordings on dates the log doesn't list —
+// either sessions to add to the log, or non-trainer workouts to exclude.
+const listed = new Set(manual.sessions.map(s => s.date));
+const excluded = new Set((manual.exclusions || []).map(e => e.date));
+const unlisted = [];
+for (const [d, day] of byDate) {
+  if (listed.has(d) || excluded.has(d)) continue;
+  const strengthy = day.filter(w => ['strength', 'stretching'].includes(w.disc));
+  if (!strengthy.length) continue;
+  const wallMins = (Math.max(...strengthy.map(w => w.endMs))
+    - Math.min(...strengthy.map(w => w.startMs))) / 60_000;
+  if (strengthy.some(w => w.mins >= BAND.minMins && w.mins <= BAND.maxMins)
+    || (wallMins >= BAND.minMins && wallMins <= BAND.maxMins)) {
+    unlisted.push(d);
+  }
+}
+console.log(`\ntrainer-band recordings not in the log (add or exclude): ${unlisted.length}`);
+for (const d of unlisted.sort()) console.log('  ', d);
+if (excluded.size) console.log(`excluded as non-trainer: ${[...excluded].sort().join(', ')}`);
+if (manual.incomplete) console.log(`note: ${manual.incomplete}`);
