@@ -7,7 +7,7 @@ import s from './ZoneDays.module.css';
 // nearest workout day; days with several sessions open an inline chooser.
 // Peloton's zone palette: Z1 blue, Z2 green, Z3 yellow, Z4 orange, Z5 red
 // (hex values approximated from the app — Peloton doesn't publish them).
-const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745'];
+export const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745'];
 const W = 640, H = 210, PAD = { l: 44, r: 10, t: 12, b: 20 };
 const DAY = 86_400_000;
 

@@ -65,7 +65,7 @@ function latticeCells(w, h) {
   return cells;
 }
 
-export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill, onPointClick, tipT, hoverId, onHover }) {
+export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill, onPointClick, tipT, hoverId, onHover, bands }) {
   // The plot renders in pixel space: the viewBox tracks the measured size of
   // the plot container, so text never distorts when the layout stretches it.
   const plotRef = useRef(null);
@@ -233,6 +233,20 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
             <stop offset="100%" stopColor={color} stopOpacity="0.02" />
           </linearGradient>
         </defs>
+        {bands && bands.map((b, i) => {
+          // Horizontal value bands (e.g. HR zones) behind everything else,
+          // clipped to the visible value range, labeled at the right edge.
+          const lo = Math.max(b.from, vMin), hi = Math.min(b.to, vMax);
+          if (hi <= lo) return null;
+          return (
+            <g key={`band${i}`}>
+              <rect x={PAD.l} width={w - PAD.l - PAD.r} y={y(hi)} height={y(lo) - y(hi)}
+                fill={b.color} fillOpacity="0.13" />
+              <text className={s.axisLabel} x={w - PAD.r - 4} y={y(hi) + 10}
+                textAnchor="end" style={{ fill: b.color }}>{b.label}</text>
+            </g>
+          );
+        })}
         {gridY.map((g, i) => (
           <line key={i} x1={PAD.l} x2={w - PAD.r} y1={y(g)} y2={y(g)} stroke="#23231e" strokeDasharray="3,4" />
         ))}

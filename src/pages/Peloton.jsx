@@ -3,7 +3,7 @@ import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness } from '../api
 import LineChart from '../components/LineChart.jsx';
 import { MuscleHighlight } from '../components/MuscleBody.jsx';
 import Splom from '../components/Splom.jsx';
-import ZoneDays from '../components/ZoneDays.jsx';
+import ZoneDays, { ZONE_COLORS } from '../components/ZoneDays.jsx';
 import { regIncBeta, fmtP } from '../lib/stats.js';
 import shared from '../styles/shared.module.css';
 import s from './Peloton.module.css';
@@ -57,6 +57,14 @@ function Stat({ label, value, unit }) {
 }
 
 const DAY = 86_400_000;
+
+// Peloton's zone boundaries as fractions of max HR: Z1 <65%, Z2 65-75%,
+// Z3 75-85%, Z4 85-95%, Z5 95%+.
+const ZONE_EDGES = [0, 0.65, 0.75, 0.85, 0.95, 1.06];
+const zoneIndexOf = (bpm, hrMax) => {
+  for (let z = 4; z >= 1; z--) if (bpm >= ZONE_EDGES[z] * hrMax) return z;
+  return 0;
+};
 
 // Custom analysis sets: named cross-discipline filters. Trainer sessions
 // were logged inconsistently as strength or stretching; the duration
@@ -430,13 +438,26 @@ export default function Peloton() {
   const [selected, setSelected] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  // Zone metaphor for the modal HR chart: 'bands' (background zone ranges)
+  // or 'trace' (the HR line colored by the zone it is in).
+  const [zoneMode, setZoneMode] = useState('bands');
   const selectedIdRef = useRef(null);
+
 
   useEffect(() => {
     getPelotonWorkouts().then(setUsers).catch(e => setError(e.message));
   }, []);
 
   const current = users?.[userIdx];
+
+  // Personal HRmax reference for zone boundaries: 3rd-highest per-workout
+  // max, robust against a single strap spike.
+  const hrMaxRef = useMemo(() => {
+    const pool = (current?.workouts || [])
+      .map(w => w.max_heart_rate).filter(v => v > 0).sort((a, b) => b - a);
+    return pool.length ? pool[Math.min(2, pool.length - 1)] : null;
+  }, [current]);
+
   const disciplines = useMemo(() => {
     const counts = new Map();
     for (const w of current?.workouts || []) {
@@ -631,7 +652,59 @@ export default function Peloton() {
             </p>
           )}
           <div className={s.charts}>
-            {charts.map(m => (
+            {(() => {
+              const hr = charts.find(m => m.key === 'heart_rate');
+              if (!hr || !hrMaxRef) return null;
+              const bands = ZONE_COLORS.map((c, z) => ({
+                from: ZONE_EDGES[z] * hrMaxRef,
+                to: ZONE_EDGES[z + 1] * hrMaxRef,
+                color: c,
+                label: `Z${z + 1}`,
+              }));
+              // Zone trace: split the HR line into consecutive same-zone
+              // runs, each drawn in its zone's color (segments share their
+              // boundary sample so the line stays continuous).
+              const segs = [];
+              let cur = null;
+              for (const p of hr.samples) {
+                const z = zoneIndexOf(p.v, hrMaxRef);
+                if (!cur || cur.z !== z) {
+                  const prev = cur?.samples[cur.samples.length - 1];
+                  cur = { z, samples: prev ? [prev, p] : [p] };
+                  segs.push(cur);
+                } else cur.samples.push(p);
+              }
+              const trace = segs.map(sg => ({
+                samples: sg.samples, color: ZONE_COLORS[sg.z], width: 2,
+              }));
+              return (
+                <div>
+                  <div className={s.chips}>
+                    {[['bands', 'zone bands'], ['trace', 'zone trace']].map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        className={s.chip + (zoneMode === mode ? ` ${s.chipActive}` : '')}
+                        onClick={() => setZoneMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <LineChart
+                    title="Heart Rate"
+                    unit={`BPM · zones vs HRmax ${hrMaxRef}`}
+                    seriesList={zoneMode === 'trace' ? trace : [{ samples: hr.samples }]}
+                    color="#ff6b9d"
+                    bands={zoneMode === 'bands' ? bands : undefined}
+                    fillFirst={zoneMode !== 'trace'}
+                    xLabel={fmtLen(selected.duration_secs)}
+                    xLabelLeft="0:00"
+                    tipT={t => fmtZone(Math.max(0, Math.round(t)))}
+                  />
+                </div>
+              );
+            })()}
+            {charts.filter(m => m.key !== 'heart_rate' || !hrMaxRef).map(m => (
               <LineChart
                 key={m.key}
                 title={m.title}
