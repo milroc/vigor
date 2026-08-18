@@ -37,6 +37,13 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
     }))
     .sort((a, b) => a.day.localeCompare(b.day));
 
+  // Zone totals across the selection live in the legend, next to the
+  // colors they describe.
+  const zoneTotals = [0, 1, 2, 3, 4].map(z =>
+    data.reduce((sum, r) => sum + (r.zones[z] || 0), 0));
+  const fmtTotal = secs => secs >= 3600
+    ? `${(secs / 3600).toFixed(1)}h` : `${Math.round(secs / 60)}m`;
+
   const t0 = Date.parse(days[0].day);
   const tMax = (Date.parse(days[days.length - 1].day) - t0) / DAY || 1;
   const x = day => PAD.l + ((Date.parse(day) - t0) / DAY / tMax) * (W - PAD.l - PAD.r);
@@ -71,7 +78,8 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
         <span className={s.legend}>
           {ZONE_COLORS.map((c, i) => (
             <span key={i} className={s.legendItem}>
-              <span className={s.swatch} style={{ background: c }} />Z{i + 1}
+              <span className={s.swatch} style={{ background: c }} />
+              Z{i + 1}{zoneTotals[i] > 0 ? ` ${fmtTotal(zoneTotals[i])}` : ''}
             </span>
           ))}
         </span>

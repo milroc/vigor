@@ -32,9 +32,6 @@ const instructorOf = w =>
   w.instructor && w.instructor.toLowerCase() !== (w.title || '').toLowerCase()
     ? w.instructor : null;
 const fmtZone = secs => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-const fmtHours = secs => secs < 3600
-  ? `0h ${Math.round(secs / 60)}m`
-  : (secs / 3600).toFixed(secs >= 36_000 ? 1 : 2);
 
 // Peloton muscle group name → Cortex typeId used by the shared body figure.
 const MUSCLE_TYPE = [
@@ -184,8 +181,6 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
     const output = scatter('avgOutput'), hrSc = scatter('avgHr'), dist = scatter('distance');
     const intensity = scatter('pctHrMax'), trimp = scatter('trimp');
     const sum = key => rides.reduce((total, r) => total + (r[key] || 0), 0);
-    const zoneTotals = [0, 1, 2, 3, 4].map(i =>
-      rides.reduce((total, r) => total + (r.zones?.[i] || 0), 0));
     const hrs = rides.map(r => r.avgHr).filter(v => v != null).sort((a, b) => a - b);
     return {
       rides,
@@ -203,7 +198,6 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
       intensitySeries: intensity?.series, intensityP: intensity?.p,
       intensityFitStart: intensity?.fitStart, intensityFitEnd: intensity?.fitEnd,
       trimpSeries: trimp?.series, trimpP: trimp?.p,
-      zoneTotals,
       slopePerMonth: ef?.slopePerMonth,
       efTotalPct: ef ? ((ef.fitEnd - ef.fitStart) / ef.fitStart) * 100 : null,
       fitStart: ef?.fitStart, fitEnd: ef?.fitEnd,
@@ -285,14 +279,6 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 unit={fmtP(analysis.intensityP)}
               />
             )}
-            {analysis.zoneTotals.some(v => v > 0) && analysis.zoneTotals.map((secs, i) => (
-              <Stat
-                key={i}
-                label={`zone ${i + 1} total`}
-                value={secs > 0 ? fmtHours(secs) : null}
-                unit={secs >= 3600 ? 'h' : null}
-              />
-            ))}
             <Stat
               label="distance traveled"
               value={analysis.totalDistance ? analysis.totalDistance.toFixed(1) : null}
@@ -607,13 +593,6 @@ export default function Peloton() {
                 unit={m.unit}
               />
             ))}
-            {[1, 2, 3, 4, 5].map(z => (
-              <Stat
-                key={z}
-                label={`hr zone ${z}`}
-                value={selected[`hr_z${z}_secs`] ? fmtZone(selected[`hr_z${z}_secs`]) : null}
-              />
-            ))}
           </div>
 
           {muscles.length > 0 && (
@@ -650,12 +629,16 @@ export default function Peloton() {
               // zone bands so the zones carry the color story.
               const hr = charts.find(m => m.key === 'heart_rate');
               if (!hr || !hrMaxRef) return null;
-              const bands = ZONE_COLORS.map((c, z) => ({
-                from: ZONE_EDGES[z] * hrMaxRef,
-                to: ZONE_EDGES[z + 1] * hrMaxRef,
-                color: c,
-                label: `Z${z + 1}`,
-              }));
+              // Time spent in each zone lives on the band label itself.
+              const bands = ZONE_COLORS.map((c, z) => {
+                const secs = selected[`hr_z${z + 1}_secs`];
+                return {
+                  from: ZONE_EDGES[z] * hrMaxRef,
+                  to: ZONE_EDGES[z + 1] * hrMaxRef,
+                  color: c,
+                  label: secs > 0 ? `Z${z + 1} ${fmtZone(secs)}` : `Z${z + 1}`,
+                };
+              });
               return (
                 <LineChart
                   title="Heart Rate"
