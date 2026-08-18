@@ -1,4 +1,6 @@
 :root {
+  /* Native controls and scrollbars render dark instead of glaring white. */
+  color-scheme: dark;
   --lime: #c6fe28;
   --bg: #0a0a08;
   --panel: #111110;

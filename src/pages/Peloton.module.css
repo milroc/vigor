@@ -41,7 +41,12 @@
   overflow-y: auto;
   background: var(--bg);
   margin-bottom: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
+.modal::-webkit-scrollbar { width: 8px; }
+.modal::-webkit-scrollbar-track { background: transparent; }
+.modal::-webkit-scrollbar-thumb { background: var(--line); }
 .detailHead {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 12px; margin-bottom: 14px;
@@ -102,6 +107,14 @@
 .fitBtn:disabled { opacity: 0.35; cursor: not-allowed; }
 .fitDash { color: var(--dim); }
 
-.tableWrap { max-height: 60vh; overflow-y: auto; }
+.tableWrap {
+  max-height: 60vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.tableWrap::-webkit-scrollbar { width: 8px; }
+.tableWrap::-webkit-scrollbar-track { background: transparent; }
+.tableWrap::-webkit-scrollbar-thumb { background: var(--line); }
 .row { cursor: pointer; }
 .rowActive td { background: rgba(198, 254, 40, 0.07); }
