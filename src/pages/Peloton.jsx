@@ -63,6 +63,10 @@ const CUSTOM_SETS = {
     disciplines: ['strength', 'stretching'],
     minSecs: TRAINER_MIN,
     maxSecs: TRAINER_MAX,
+    // Paused/restarted recordings within 30min merge into one session
+    // server-side, so the dropdown count (individual recordings) can be
+    // slightly below the analyzed session count.
+    mergeGapMins: 30,
     matches: w => ['strength', 'stretching'].includes(w.discipline)
       && w.duration_secs >= TRAINER_MIN && w.duration_secs <= TRAINER_MAX,
   },
@@ -149,6 +153,7 @@ function FitnessPanel({ current, discipline }) {
           from, to, weightLbs: weight,
           disciplines: set.disciplines.join(','),
           minSecs: set.minSecs, maxSecs: set.maxSecs,
+          mergeGapMins: set.mergeGapMins,
         }
         : {
           title, from, to, weightLbs: weight,

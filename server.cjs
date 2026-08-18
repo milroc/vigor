@@ -681,16 +681,68 @@ const server = http.createServer((req, res) => {
       const hrPool = ((disciplines.length || discipline) ? all.filter(inDiscipline) : all)
         .map(w => w.max_heart_rate).filter(v => v > 0).sort((a, b) => b - a);
       const hrMax = hrPool.length ? hrPool[Math.min(2, hrPool.length - 1)] : null;
-      const workouts = all
+      const candidates = all
         .filter(w => w.status === 'COMPLETE'
           && inDiscipline(w)
-          && (w.duration_secs || 0) >= minSecs
-          && (w.duration_secs || 0) <= maxSecs
           && (!title || (w.title || '') === title)
           && (!from || String(w.start) >= from)
           && (!to || String(w.start).slice(0, 10) <= to))
         .sort((a, b) => String(a.start).localeCompare(String(b.start)));
-      const byId = new Map(workouts.map(w => [String(w.id), w]));
+
+      // Optionally merge back-to-back recordings (paused/restarted mid-
+      // session) into one logical session. The duration band then applies
+      // to the merged wall-clock span, so a split trainer hour still counts.
+      const mergeGap = Number(q.get('mergeGapMins')) || 0;
+      const clusters = [];
+      for (const w of candidates) {
+        const startMs = Date.parse(w.start), endMs = Date.parse(w.end || w.start) || startMs;
+        const prev = clusters[clusters.length - 1];
+        if (mergeGap > 0 && prev && (startMs - prev.endMs) / 60_000 <= mergeGap) {
+          prev.members.push({ w, offset: Math.round((startMs - prev.startMs) / 1000) });
+          prev.endMs = Math.max(prev.endMs, endMs);
+        } else {
+          clusters.push({ startMs, endMs, members: [{ w, offset: 0 }] });
+        }
+      }
+      const byId = new Map();
+      const workouts = clusters.map(c => {
+        const ws = c.members.map(m => m.w);
+        let session = ws[0];
+        if (ws.length > 1) {
+          const sum = pick => ws.reduce((total, w) => total + (pick(w) || 0), 0);
+          const durSum = sum(w => w.duration_secs) || 1;
+          session = {
+            ...ws[0],
+            title: `${ws[0].title || ws[0].discipline} (+${ws.length - 1} merged)`,
+            duration_secs: Math.round((c.endMs - c.startMs) / 1000),
+            end: ws[ws.length - 1].end,
+            avg_heart_rate: ws.some(w => w.avg_heart_rate)
+              ? sum(w => (w.avg_heart_rate || 0) * (w.duration_secs || 0)) / durSum : null,
+            max_heart_rate: Math.max(...ws.map(w => w.max_heart_rate || 0)) || null,
+            strive_score: ws.some(w => w.strive_score != null) ? sum(w => w.strive_score) : null,
+            calories: ws.some(w => (w.calories ?? w.total_calories) != null)
+              ? sum(w => w.calories ?? w.total_calories) : null,
+            total_calories: null,
+            total_output: ws.some(w => (w.total_output ?? w.total_total_output) != null)
+              ? sum(w => w.total_output ?? w.total_total_output) : null,
+            total_total_output: null,
+            distance: ws.some(w => (w.distance ?? w.total_distance) != null)
+              ? sum(w => w.distance ?? w.total_distance) : null,
+            total_distance: null,
+          };
+          for (let z = 1; z <= 5; z++) {
+            session[`hr_z${z}_secs`] = sum(w => w[`hr_z${z}_secs`]) || null;
+          }
+        }
+        return { session, members: c.members };
+      }).filter(({ session }) =>
+        (session.duration_secs || 0) >= minSecs && (session.duration_secs || 0) <= maxSecs
+      ).map(({ session, members }) => {
+        // Per-second metrics of every member recording accumulate into the
+        // session, with seconds offset onto the merged timeline.
+        for (const m of members) byId.set(String(m.w.id), { session, offset: m.offset });
+        return session;
+      });
 
       // Workload signal, in preference order: power, speed, then pace
       // (outdoor walks record pace only; inverted to speed below so higher
@@ -710,13 +762,14 @@ const server = http.createServer((req, res) => {
       const acc = new Map();
       for (let i = 1; i < lines.length; i++) {
         const parts = lines[i].split(',');
-        const w = byId.get(parts[iId]);
-        if (!w) continue;
-        const sec = +parts[iSec];
+        const hit = byId.get(parts[iId]);
+        if (!hit) continue;
+        const w = hit.session;
+        const sec = +parts[iSec] + hit.offset;
         if (!(sec > WARMUP)) continue;
-        let a = acc.get(parts[iId]);
+        let a = acc.get(String(w.id));
         if (!a) {
-          acc.set(parts[iId], a = {
+          acc.set(String(w.id), a = {
             wSum: 0, wN: 0, hrSum: 0, hrN: 0, maxHr: 0,
             h: [[0, 0, 0], [0, 0, 0]], mins: [],
           });
