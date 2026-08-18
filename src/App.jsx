@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Backup from './pages/Backup.jsx';
 import Workout from './pages/Workout.jsx';
 import VizLab from './pages/VizLab.jsx';
+import Peloton from './pages/Peloton.jsx';
 import s from './App.module.css';
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
           <NavLink to="/" end className={navClass}>Lift</NavLink>
           <NavLink to="/backup" className={navClass}>Backup</NavLink>
           <NavLink to="/viz" className={navClass}>Movement Report</NavLink>
+          <NavLink to="/peloton" className={navClass}>Peloton</NavLink>
         </nav>
         <div className={s.connBadge}>
           <span className={s.connDot + (connected ? ` ${s.on}` : '')} />
@@ -44,6 +46,7 @@ export default function App() {
         <Route path="/backup" element={<Backup />} />
         <Route path="/workout/:id" element={<Workout />} />
         <Route path="/viz" element={<VizLab />} />
+        <Route path="/peloton" element={<Peloton />} />
       </Routes>
     </>
   );

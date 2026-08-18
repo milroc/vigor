@@ -1,0 +1,80 @@
+.main { max-width: 1100px; padding: 28px; }
+
+.intro { color: var(--dim); line-height: 1.7; margin: 12px 0; }
+.intro strong { color: var(--text); }
+
+.error { color: var(--red); }
+
+.headRow {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 6px 12px; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.chip:hover { border-color: var(--lime); color: var(--lime); }
+.chipActive { border-color: var(--lime); color: var(--lime); }
+
+.detail {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.detailHead {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+}
+.detailTitle {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+}
+.detailSub { color: var(--dim); font-size: 12px; margin-top: 4px; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 16px; }
+.statValue { font-size: 20px; font-weight: 600; color: var(--text); }
+.statValue small { font-size: 11px; color: var(--dim); }
+.statLabel {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--dim); margin-top: 2px;
+}
+
+.charts { display: flex; flex-direction: column; gap: 14px; }
+
+.muscleRow {
+  display: flex; align-items: flex-start; gap: 28px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.muscleBars { flex: 1; min-width: 240px; max-width: 420px; }
+.muscleTitle {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--dim); margin-bottom: 8px;
+}
+.muscleBar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.muscleName { width: 110px; font-size: 11px; color: var(--text); text-transform: capitalize; }
+.muscleTrack { flex: 1; height: 8px; background: var(--line); }
+.muscleFill { height: 100%; background: var(--lime); }
+.musclePct { width: 36px; font-size: 11px; color: var(--dim); text-align: right; }
+
+.fitness { margin: 24px 0; }
+.fitControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+.fitInput {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); padding: 10px 12px;
+  color-scheme: dark;
+}
+.fitInput:focus { outline: none; border-color: var(--lime); }
+.fitWeight { width: 110px; }
+.fitDash { color: var(--dim); }
+
+.tableWrap { max-height: 60vh; overflow-y: auto; }
+.row { cursor: pointer; }
+.rowActive td { background: rgba(198, 254, 40, 0.07); }

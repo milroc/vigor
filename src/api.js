@@ -19,6 +19,16 @@ async function get(url) {
 export const runVoltra = args => post('/api/run', { args });
 export const startBackup = () => post('/api/backup');
 export const getBackupStatus = () => get('/api/backup/status');
+export const startPelotonBackup = () => post('/api/backup/peloton');
+export const getPelotonBackupStatus = () => get('/api/backup/peloton/status');
+export const getPelotonWorkouts = () => get('/api/peloton/workouts');
+export const getPelotonFitness = (dir, params) => {
+  const q = new URLSearchParams({ dir });
+  for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
+  return get(`/api/peloton/fitness?${q}`);
+};
+export const getPelotonMetrics = (dir, workoutId) =>
+  get(`/api/peloton/metrics?dir=${encodeURIComponent(dir)}&workout=${encodeURIComponent(workoutId)}`);
 export const listBackups = () => get('/api/backups');
 export const sendChat = (messages, context, screenshot) => post('/api/chat', { messages, context, screenshot });
 export const getTargets = () => get('/api/targets');

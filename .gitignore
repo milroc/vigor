@@ -3,6 +3,7 @@ node_modules/
 dist/
 
 # runtime user data written by server.cjs
+.env
 backups/
 telemetry/
 targets.json

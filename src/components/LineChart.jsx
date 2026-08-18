@@ -176,7 +176,13 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
           </>
         )}
         {areaPath && <path d={areaPath} fill={`url(#${gid})`} />}
-        {seriesList.map((ser, i) => (
+        {seriesList.map((ser, i) => ser.dots ? (
+          <g key={i} fill={ser.color ?? color} fillOpacity={ser.opacity ?? 0.8}>
+            {ser.samples.map((p, j) => (
+              <circle key={j} cx={x(p.t)} cy={y(p.v)} r={ser.r ?? 3} />
+            ))}
+          </g>
+        ) : (
           <path
             key={i}
             d={pathOf(ser.samples)}

@@ -1,4 +1,5 @@
 const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -142,10 +143,308 @@ async function backupAll() {
   fs.writeFileSync(path.join(dir, 'reps.csv'), toCsv(repRows));
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
     createdAt: new Date().toISOString(),
+    source: 'voltra',
     counts: { workouts: workoutRows.length, sets: setRows.length, reps: repRows.length },
     note: 'All weights in lbs, distances in mm, timestamps UTC. IDs are Beyond cloud IDs.',
   }, null, 2));
   return { dir, workouts: workoutRows.length, sets: setRows.length, reps: repRows.length };
+}
+
+// ---- Peloton ---------------------------------------------------------------
+// Peloton has no official public API; this drives the same REST endpoints the
+// web app uses, authenticated by the session cookie /auth/login returns.
+// Credentials come from PELOTON_EMAIL / PELOTON_PASSWORD in .env (gitignored).
+const PELO_API = 'https://api.onepeloton.com';
+
+(function loadEnvFile() {
+  const file = path.join(__dirname, '.env');
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const m = line.match(/^\s*(\w+)\s*=\s*(.*?)\s*$/);
+    if (m && m[2] && !(m[1] in process.env)) process.env[m[1]] = m[2];
+  }
+})();
+
+// Peloton killed plain password login in late 2025; this is the members-site
+// Auth0 OAuth + PKCE flow, ported from peloton-to-garmin v6
+// (github.com/philosowaffle/peloton-to-garmin issue #795).
+const PELO_AUTH = 'https://auth.onepeloton.com';
+const PELO_CLIENT_ID = 'WVoJxVDdPoFx4RNewvvg6ch2mZ7bwnsM';
+const PELO_REDIRECT = 'https://members.onepeloton.com/callback';
+const PELO_SCOPE = 'offline_access openid peloton-api.members:default';
+const PELO_AUTH0_CLIENT = 'eyJuYW1lIjoiYXV0aDAuanMtdWxwIiwidmVyc2lvbiI6IjkuMTQuMyJ9';
+const PELO_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0';
+
+const b64url = buf => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+const randStr = n => b64url(crypto.randomBytes(n)).slice(0, n);
+
+function peloAccounts() {
+  const { PELOTON_LOGIN, PELOTON_PASSWORD, PELOTON_LOGIN_2, PELOTON_PASSWORD_2 } = process.env;
+  const acc = [];
+  if (PELOTON_LOGIN && PELOTON_PASSWORD) acc.push({ login: PELOTON_LOGIN, password: PELOTON_PASSWORD });
+  if (PELOTON_LOGIN_2 && PELOTON_PASSWORD_2) acc.push({ login: PELOTON_LOGIN_2, password: PELOTON_PASSWORD_2 });
+  return acc;
+}
+
+async function peloOAuthLogin(login, password) {
+  // Minimal per-host cookie jar + manual redirect follower; fetch has neither.
+  const jar = new Map();
+  const storeCookies = (url, res) => {
+    const host = new URL(url).host;
+    for (const sc of res.headers.getSetCookie()) {
+      const [pair] = sc.split(';');
+      const eq = pair.indexOf('=');
+      if (eq < 0) continue;
+      if (!jar.has(host)) jar.set(host, new Map());
+      jar.get(host).set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
+  };
+  const request = async (url, opts = {}) => {
+    const hops = [];
+    for (let i = 0; i < 15; i++) {
+      const cookies = jar.get(new URL(url).host);
+      const cookie = cookies?.size ? [...cookies].map(([k, v]) => `${k}=${v}`).join('; ') : null;
+      const res = await fetch(url, {
+        ...opts,
+        headers: { 'User-Agent': PELO_UA, ...(opts.headers || {}), ...(cookie ? { Cookie: cookie } : {}) },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(30_000),
+      });
+      storeCookies(url, res);
+      if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        url = new URL(res.headers.get('location'), url).href;
+        hops.push(url);
+        opts = { method: 'GET' };
+        continue;
+      }
+      return { res, finalUrl: url, hops };
+    }
+    throw new Error('too many redirects');
+  };
+  const findCode = r => [r.finalUrl, ...r.hops]
+    .map(u => new URL(u).searchParams.get('code')).find(Boolean);
+
+  // 1. /authorize → login page URL + state + CSRF cookie
+  const verifier = randStr(64);
+  const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+  const nonce = randStr(32);
+  const init = await request(PELO_AUTH + '/authorize?' + new URLSearchParams({
+    client_id: PELO_CLIENT_ID, audience: PELO_API + '/', scope: PELO_SCOPE,
+    response_type: 'code', response_mode: 'query', redirect_uri: PELO_REDIRECT,
+    state: randStr(32), nonce, code_challenge: challenge,
+    code_challenge_method: 'S256', auth0Client: PELO_AUTH0_CLIENT,
+  }));
+  const loginUrl = init.hops[0] || init.finalUrl;
+  const state = new URL(loginUrl).searchParams.get('state');
+  const csrf = jar.get(new URL(PELO_AUTH).host)?.get('_csrf');
+  if (!csrf || !state) throw new Error('peloton authorize flow changed: missing csrf/state');
+
+  // 2. submit credentials
+  const cred = await request(PELO_AUTH + '/usernamepassword/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', Accept: '*/*',
+      Origin: PELO_AUTH, Referer: loginUrl, 'Auth0-Client': PELO_AUTH0_CLIENT,
+    },
+    body: JSON.stringify({
+      client_id: PELO_CLIENT_ID, redirect_uri: PELO_REDIRECT, tenant: 'peloton-prod',
+      response_type: 'code', scope: PELO_SCOPE, audience: PELO_API + '/',
+      _csrf: csrf, state, _intstate: 'deprecated', nonce,
+      username: login, password, connection: 'pelo-user-password',
+      code_challenge: challenge, code_challenge_method: 'S256',
+    }),
+  });
+  if (cred.res.status >= 400) {
+    throw new Error(`peloton login failed for ${login} (HTTP ${cred.res.status}) — check credentials`);
+  }
+
+  // 3. Auth0 returns a self-submitting form that lands on callback?code=…
+  let code = findCode(cred);
+  if (!code) {
+    const html = await cred.res.text();
+    const action = html.match(/<form[^>]*action="([^"]*)"/i)?.[1];
+    if (!action) throw new Error('peloton login flow changed: no redirect and no callback form');
+    const decode = s => s.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(d))
+      .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const fields = new URLSearchParams();
+    for (const inp of html.matchAll(/<input[^>]+type="hidden"[^>]*>/gi)) {
+      const name = inp[0].match(/name="([^"]*)"/i)?.[1];
+      if (name) fields.set(name, decode(inp[0].match(/value="([^"]*)"/i)?.[1] ?? ''));
+    }
+    const form = await request(new URL(action, PELO_AUTH).href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: fields.toString(),
+    });
+    code = findCode(form);
+    if (!code) throw new Error('peloton login flow changed: no authorization code');
+  }
+
+  // 4. exchange code for tokens
+  const res = await fetch(PELO_AUTH + '/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': PELO_UA },
+    body: JSON.stringify({
+      grant_type: 'authorization_code', client_id: PELO_CLIENT_ID,
+      code_verifier: verifier, code, redirect_uri: PELO_REDIRECT,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const token = await res.json().catch(() => ({}));
+  if (!res.ok || !token.access_token) throw new Error(`peloton token exchange failed (HTTP ${res.status})`);
+  return token;
+}
+
+// Tokens last 48h and come with a refresh token; cache per login so repeat
+// backups skip the whole browser dance.
+const peloTokens = new Map();
+
+async function getPeloToken(acc) {
+  const cached = peloTokens.get(acc.login);
+  if (cached && Date.now() < cached.expiresAt - 60_000) return cached.accessToken;
+  let token = null;
+  if (cached?.refreshToken) {
+    const res = await fetch(PELO_AUTH + '/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': PELO_UA },
+      body: JSON.stringify({
+        grant_type: 'refresh_token', client_id: PELO_CLIENT_ID, refresh_token: cached.refreshToken,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    }).catch(() => null);
+    if (res?.ok) token = await res.json().catch(() => null);
+  }
+  if (!token?.access_token) token = await peloOAuthLogin(acc.login, acc.password);
+  peloTokens.set(acc.login, {
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token || cached?.refreshToken,
+    expiresAt: Date.now() + (token.expires_in || 3600) * 1000,
+  });
+  return token.access_token;
+}
+
+async function peloApi(pathname, accessToken) {
+  for (let attempt = 0; ; attempt++) {
+    await sleep(300);
+    const res = await fetch(PELO_API + pathname, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'User-Agent': PELO_UA },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (res.ok) return res.json();
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await sleep(10_000);
+      continue;
+    }
+    throw new Error(`peloton ${pathname.split('?')[0]} → HTTP ${res.status}`);
+  }
+}
+
+const pelotonState = {
+  running: false, phase: 'idle', error: null, result: null, startedAt: null,
+  username: null, accountsDone: 0, accountsTotal: 0,
+  totalWorkouts: 0, processedWorkouts: 0, samples: 0,
+};
+
+async function backupPelotonAccount(acc) {
+  Object.assign(pelotonState, {
+    phase: 'login', username: acc.login,
+    totalWorkouts: 0, processedWorkouts: 0, samples: 0,
+  });
+  const token = await getPeloToken(acc);
+  const me = await peloApi('/api/me', token);
+  pelotonState.username = me.username;
+
+  pelotonState.phase = 'listing';
+  const workouts = [];
+  for (let page = 0, pages = 1; page < pages; page++) {
+    const res = await peloApi(
+      `/api/user/${me.id}/workouts?joins=ride,ride.instructor&limit=100&page=${page}`, token);
+    workouts.push(...(res.data || []));
+    pages = res.page_count || 1;
+  }
+
+  pelotonState.phase = 'workouts';
+  pelotonState.totalWorkouts = workouts.length;
+  const workoutRows = [], metricRows = [], muscleRows = [];
+  for (const w of workouts) {
+    const row = {
+      id: w.id,
+      start: w.start_time ? new Date(w.start_time * 1000).toISOString() : '',
+      end: w.end_time ? new Date(w.end_time * 1000).toISOString() : '',
+      discipline: w.fitness_discipline,
+      type: w.workout_type,
+      status: w.status,
+      title: w.ride?.title ?? w.title ?? '',
+      instructor: w.ride?.instructor?.name ?? '',
+      duration_secs: w.ride?.duration ?? '',
+      total_work: w.total_work,
+    };
+    try {
+      const graph = await peloApi(`/api/workout/${w.id}/performance_graph?every_n=1`, token);
+      for (const sum of graph.summaries || []) row[sum.slug] = sum.value;
+      const ez = graph.effort_zones;
+      if (ez) {
+        row.strive_score = ez.total_effort_points;
+        const zones = ez.heart_rate_zone_durations || {};
+        for (let i = 1; i <= 5; i++) row[`hr_z${i}_secs`] = zones[`heart_rate_z${i}_duration`];
+      }
+      // "Body Activity" in the app: per-muscle-group scores.
+      for (const m of graph.muscle_group_score || []) muscleRows.push({ workoutId: w.id, ...m });
+      const metrics = graph.metrics || [];
+      for (const m of metrics) {
+        row[`avg_${m.slug}`] = m.average_value;
+        row[`max_${m.slug}`] = m.max_value;
+      }
+      const secs = graph.seconds_since_pedaling_start || [];
+      for (let i = 0; i < secs.length; i++) {
+        const mr = { workoutId: w.id, second: secs[i] };
+        for (const m of metrics) mr[m.slug] = m.values?.[i];
+        metricRows.push(mr);
+      }
+      pelotonState.samples = metricRows.length;
+    } catch (err) {
+      // Some disciplines (meditation, stretching) have no performance graph.
+      row.graph_error = err.message;
+    }
+    workoutRows.push(row);
+    pelotonState.processedWorkouts++;
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const user = String(me.username || 'user').replace(/[^\w.-]/g, '');
+  const dir = path.join(__dirname, 'backups', `${stamp}-peloton-${user}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'workouts.csv'), toCsv(workoutRows));
+  fs.writeFileSync(path.join(dir, 'metrics.csv'), toCsv(metricRows));
+  fs.writeFileSync(path.join(dir, 'muscle_groups.csv'), toCsv(muscleRows));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+    createdAt: new Date().toISOString(),
+    source: 'peloton',
+    user: me.username,
+    counts: { workouts: workoutRows.length, samples: metricRows.length, muscles: muscleRows.length },
+    note: 'Per-second metrics at every_n=1. Strive score + HR zones + muscle groups from effort_zones/muscle_group_score. Timestamps UTC. IDs are Peloton cloud IDs.',
+  }, null, 2));
+  return { dir, username: me.username, workouts: workoutRows.length, samples: metricRows.length };
+}
+
+async function backupPeloton() {
+  const accounts = peloAccounts();
+  if (!accounts.length) {
+    throw new Error('no Peloton credentials in env — start the server via: '
+      + 'av inject +PELOTON_LOGIN +PELOTON_PASSWORD -- npm run serve');
+  }
+  Object.assign(pelotonState, {
+    running: true, phase: 'login', error: null, result: null,
+    startedAt: new Date().toISOString(),
+    username: null, accountsDone: 0, accountsTotal: accounts.length,
+    totalWorkouts: 0, processedWorkouts: 0, samples: 0,
+  });
+  const results = [];
+  for (const acc of accounts) {
+    results.push(await backupPelotonAccount(acc));
+    pelotonState.accountsDone++;
+  }
+  return results;
 }
 
 function listBackups() {
@@ -156,11 +455,47 @@ function listBackups() {
     .map(name => {
       try {
         const m = JSON.parse(fs.readFileSync(path.join(root, name, 'manifest.json'), 'utf8'));
-        return { name, createdAt: m.createdAt, counts: m.counts };
+        return { name, createdAt: m.createdAt, counts: m.counts, source: m.source || 'voltra', user: m.user };
       } catch { return null; }
     })
     .filter(Boolean)
     .sort((a, b) => b.name.localeCompare(a.name));
+}
+
+// Inverse of toCsv, with quote support; '' → null, numeric strings → numbers.
+function fromCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c !== '"') field += c;
+      else if (text[i + 1] === '"') { field += '"'; i++; }
+      else inQ = false;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') {
+      row.push(field); field = '';
+      if (row.length > 1 || row[0] !== '') rows.push(row);
+      row = [];
+    } else if (c !== '\r') field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  const [header, ...data] = rows;
+  return data.map(r => Object.fromEntries(header.map((name, i) => {
+    let v = r[i] ?? '';
+    if (v !== '' && /^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
+    return [name, v === '' ? null : v];
+  })));
+}
+
+// Newest peloton backup per user.
+function latestPelotonBackups() {
+  const byUser = new Map();
+  for (const b of listBackups()) {
+    if (b.source === 'peloton' && b.user && !byUser.has(b.user)) byUser.set(b.user, b);
+  }
+  return [...byUser.values()];
 }
 
 const MIME = {
@@ -256,6 +591,189 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && pathname === '/api/backup/status') {
     return json(res, 200, { ok: true, data: backupState });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/backup/peloton') {
+    if (!requireJson(req, res)) return;
+    if (pelotonState.running) return json(res, 409, { ok: false, error: 'peloton backup already running' });
+    backupPeloton()
+      .then(result => { pelotonState.phase = 'done'; pelotonState.result = result; })
+      .catch(err => { pelotonState.phase = 'error'; pelotonState.error = err.message; })
+      .finally(() => { pelotonState.running = false; });
+    return json(res, 202, { ok: true, data: { started: true } });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/backup/peloton/status') {
+    return json(res, 200, { ok: true, data: pelotonState });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/peloton/workouts') {
+    try {
+      const data = latestPelotonBackups().map(b => ({
+        user: b.user, dir: b.name, createdAt: b.createdAt,
+        workouts: fromCsv(fs.readFileSync(path.join(__dirname, 'backups', b.name, 'workouts.csv'), 'utf8')),
+      }));
+      return json(res, 200, { ok: true, data });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
+
+  if (req.method === 'GET' && pathname === '/api/peloton/metrics') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const dir = q.get('dir') || '', workout = q.get('workout') || '';
+    if (!/^[\w.-]+$/.test(dir) || !/^[\w-]+$/.test(workout)) {
+      return json(res, 400, { ok: false, error: 'bad dir or workout param' });
+    }
+    const file = path.join(__dirname, 'backups', dir, 'metrics.csv');
+    if (!fs.existsSync(file)) return json(res, 404, { ok: false, error: 'no metrics for that backup' });
+    try {
+      // metrics.csv is hundreds of thousands of rows; workoutId is the first
+      // column and never quoted, so cheap line filtering beats full parsing.
+      const lines = fs.readFileSync(file, 'utf8').split('\n');
+      const keep = [lines[0], ...lines.filter((l, i) => i > 0 && l.startsWith(workout + ','))];
+      const musclesFile = path.join(__dirname, 'backups', dir, 'muscle_groups.csv');
+      const muscles = fs.existsSync(musclesFile)
+        ? fromCsv(fs.readFileSync(musclesFile, 'utf8')).filter(r => String(r.workoutId) === workout)
+        : [];
+      return json(res, 200, { ok: true, data: { metrics: fromCsv(keep.join('\n')), muscles } });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
+
+  // Per-ride cardio fitness numbers (no aggregation): EF = steady-state
+  // watts per heartbeat, decoupling = EF fade first half → second half.
+  if (req.method === 'GET' && pathname === '/api/peloton/fitness') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const dir = q.get('dir') || '';
+    if (!/^[\w.-]+$/.test(dir)) return json(res, 400, { ok: false, error: 'bad dir param' });
+    const base = path.join(__dirname, 'backups', dir);
+    if (!fs.existsSync(path.join(base, 'workouts.csv'))) {
+      return json(res, 404, { ok: false, error: 'no such backup' });
+    }
+    try {
+      const title = q.get('title'), discipline = q.get('discipline');
+      const from = q.get('from'), to = q.get('to');
+      const weightKg = q.get('weightLbs') ? Number(q.get('weightLbs')) * 0.45359 : null;
+      const WARMUP = 120;
+      const all = fromCsv(fs.readFileSync(path.join(base, 'workouts.csv'), 'utf8'));
+      // Personal HRmax proxy: highest HR ever recorded across the whole backup.
+      const hrMax = Math.max(0, ...all.map(w => w.max_heart_rate || 0)) || null;
+      const workouts = all
+        .filter(w => w.status === 'COMPLETE'
+          && (!discipline || w.discipline === discipline)
+          && (!title || (w.title || '') === title)
+          && (!from || String(w.start) >= from)
+          && (!to || String(w.start).slice(0, 10) <= to))
+        .sort((a, b) => String(a.start).localeCompare(String(b.start)));
+      const byId = new Map(workouts.map(w => [String(w.id), w]));
+
+      // Single pass over metrics.csv with plain accumulators — the file is
+      // hundreds of thousands of rows, so no per-row object churn.
+      const lines = fs.readFileSync(path.join(base, 'metrics.csv'), 'utf8').split('\n');
+      const header = (lines[0] || '').split(',');
+      const iId = header.indexOf('workoutId'), iSec = header.indexOf('second');
+      const iOut = header.indexOf('output'), iHr = header.indexOf('heart_rate');
+      const acc = new Map();
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(',');
+        const w = byId.get(parts[iId]);
+        if (!w) continue;
+        const sec = +parts[iSec];
+        if (!(sec > WARMUP)) continue;
+        let a = acc.get(parts[iId]);
+        if (!a) {
+          acc.set(parts[iId], a = {
+            outSum: 0, outN: 0, maxHr: 0, h: [[0, 0, 0], [0, 0, 0]], mins: [],
+          });
+        }
+        const out = parts[iOut] === '' || parts[iOut] == null ? null : +parts[iOut];
+        const hr = parts[iHr] === '' || parts[iHr] == null ? 0 : +parts[iHr];
+        if (out != null) { a.outSum += out; a.outN++; }
+        if (hr > a.maxHr) a.maxHr = hr;
+        if (out != null && hr > 0) {
+          const mid = WARMUP + ((w.duration_secs || 1200) - WARMUP) / 2;
+          const half = a.h[sec <= mid ? 0 : 1];
+          half[0] += out; half[1] += hr; half[2]++;
+          // Minute bins for the VO2 proxy regression. HR lags power by
+          // ~30-60s, so per-second pairs flatten the slope and wildly
+          // over-extrapolate; minute means plus a 30s HR shift (HR is
+          // credited to the minute of the power that caused it) absorb it.
+          const mw = Math.floor(sec / 60);
+          const wBin = a.mins[mw] || (a.mins[mw] = [0, 0, 0, 0]);
+          wBin[0] += out; wBin[1]++;
+          const mh = Math.floor((sec - 30) / 60);
+          if (mh >= 0) {
+            const hBin = a.mins[mh] || (a.mins[mh] = [0, 0, 0, 0]);
+            hBin[2] += hr; hBin[3]++;
+          }
+        }
+      }
+
+      const rides = workouts.map(w => {
+        const a = acc.get(String(w.id));
+        const [h1, h2] = a?.h || [[0, 0, 0], [0, 0, 0]];
+        const pairs = h1[2] + h2[2];
+        const ride = {
+          id: w.id, start: w.start, title: w.title,
+          avgOutput: a?.outN ? a.outSum / a.outN : null,
+          avgHr: pairs ? (h1[1] + h2[1]) / pairs : null,
+          maxHr: a?.maxHr || null,
+          ef: null, decoupling: null,
+          totalOutput: w.total_output ?? w.total_total_output ?? null,
+          distance: w.distance ?? w.total_distance ?? null,
+          calories: w.calories ?? w.total_calories ?? null,
+          strive: w.strive_score ?? null,
+        };
+        // EF over sums == meanOutput/meanHr; require ~5min of paired samples.
+        if (pairs >= 300) {
+          ride.ef = (h1[0] + h2[0]) / (h1[1] + h2[1]);
+          if (h1[2] > 30 && h2[2] > 30) {
+            const ef1 = h1[0] / h1[1], ef2 = h2[0] / h2[1];
+            ride.decoupling = ((ef1 - ef2) / ef1) * 100;
+          }
+          // Submaximal VO2max proxy (YMCA-style): OLS of minute-mean HR on
+          // minute-mean power, extrapolated to personal HRmax = predicted
+          // max aerobic power. ACSM cycling equation converts to ml/kg/min
+          // when weight is known. Guards: enough bins, real power variance
+          // within the ride, physiological slope — otherwise the ride is
+          // too steady to extrapolate and gets no estimate.
+          const bins = (a.mins || [])
+            .filter(bin => bin && bin[1] >= 30 && bin[3] >= 30)
+            .map(bin => ({ w: bin[0] / bin[1], hr: bin[2] / bin[3] }));
+          if (hrMax && bins.length >= 8) {
+            const ws = bins.map(bin => bin.w);
+            const n = bins.length;
+            const sW = ws.reduce((sum, v) => sum + v, 0);
+            const sH = bins.reduce((sum, bin) => sum + bin.hr, 0);
+            const sWH = bins.reduce((sum, bin) => sum + bin.w * bin.hr, 0);
+            const sW2 = ws.reduce((sum, v) => sum + v * v, 0);
+            const den = n * sW2 - sW * sW;
+            const range = Math.max(...ws) - Math.min(...ws);
+            if (den > 0 && range >= 30) {
+              const slope = (n * sWH - sW * sH) / den;
+              const intercept = (sH - slope * sW) / n;
+              if (slope >= 0.1) {
+                // Interpolated, not extrapolated: 100W sits inside the
+                // ridden power band, so this is the fitted HR at a fixed
+                // reference workload — falling over time = fitter.
+                ride.hrAt100 = intercept + slope * 100;
+                const wMax = (hrMax - intercept) / slope;
+                if (wMax > 100 && wMax < 500) {
+                  ride.wAtHrMax = wMax;
+                  if (weightKg) ride.vo2 = (10.8 * wMax + 7 * weightKg) / weightKg;
+                }
+              }
+            }
+          }
+        }
+        return ride;
+      });
+      return json(res, 200, { ok: true, data: { rides, hrMax } });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
   }
 
   if (req.method === 'GET' && pathname === '/api/backups') {
