@@ -79,7 +79,7 @@ const CUSTOM_SETS = {
 
 // Raw per-ride cardio analysis — every ride is its own data point, no
 // monthly averaging. Trend comes from a least-squares fit over the points.
-function FitnessPanel({ current, discipline }) {
+function FitnessPanel({ current, discipline, onOpenWorkout }) {
   const [title, setTitle] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -138,9 +138,10 @@ function FitnessPanel({ current, discipline }) {
     const tMax = tOf(rides[rides.length - 1]);
     const mean = a => a.reduce((sum, v) => sum + v, 0) / a.length;
 
-    // Dots for the raw points, least-squares line for the trend.
+    // Dots for the raw points, least-squares line for the trend. Each point
+    // carries its workout id so charts can open the workout on click.
     const scatter = key => {
-      const pts = rides.map(r => ({ t: tOf(r), v: r[key] })).filter(p => p.v != null);
+      const pts = rides.map(r => ({ t: tOf(r), v: r[key], id: r.id })).filter(p => p.v != null);
       if (pts.length < 3) return null;
       const mx = mean(pts.map(p => p.t)), my = mean(pts.map(p => p.v));
       const slope = pts.reduce((sum, p) => sum + (p.t - mx) * (p.v - my), 0)
@@ -329,14 +330,14 @@ function FitnessPanel({ current, discipline }) {
                 title={analysis.workloadKey === 'speed' ? 'Efficiency (speed per heartbeat)' : 'Efficiency Factor'}
                 unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'}/BPM · thick line = trend fit · ${fmtP(analysis.efP)}`}
                 seriesList={analysis.efSeries} color="#c6fe28"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
             {analysis.intensitySeries && (
               <LineChart
                 title="Intensity" unit={`%HRMAX · avg HR relative to your HRmax · ${fmtP(analysis.intensityP)}`}
                 seriesList={analysis.intensitySeries} color="#b48aff"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
             {analysis.trimpSeries && (
@@ -344,17 +345,17 @@ function FitnessPanel({ current, discipline }) {
                 title="Training Load (Edwards TRIMP)"
                 unit={`ZONE-WEIGHTED MINUTES · ${fmtP(analysis.trimpP)}`}
                 seriesList={analysis.trimpSeries} color="#e07b39"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
-            <ZoneDays rides={analysis.rides} />
+            <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout} />
             {analysis.vo2Series && (
               <LineChart
                 title={analysis.vo2InMlKg ? 'Estimated VO₂max' : 'Estimated Max Aerobic Power'}
                 unit={(analysis.vo2InMlKg ? 'ML/KG/MIN' : 'W')
                   + ` · HR-vs-power extrapolated to personal HRmax · ${fmtP(analysis.vo2P)}`}
                 seriesList={analysis.vo2Series} color="#e0c341"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
             {analysis.hr100Series && (
@@ -362,7 +363,7 @@ function FitnessPanel({ current, discipline }) {
                 title="Predicted HR at 100W"
                 unit={`BPM · fixed workload, lower = fitter · ${fmtP(analysis.hr100P)}`}
                 seriesList={analysis.hr100Series} color="#ff9d4d"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
             {analysis.outputSeries && (
@@ -370,21 +371,21 @@ function FitnessPanel({ current, discipline }) {
                 title={analysis.workloadKey === 'speed' ? 'Avg Speed (steady-state)' : 'Avg Output (steady-state)'}
                 unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'} · thick line = trend fit · ${fmtP(analysis.outputP)}`}
                 seriesList={analysis.outputSeries} color="#4da3ff"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
             {analysis.hrSeries && (
               <LineChart
                 title="Avg Heart Rate (steady-state)" unit={`BPM · thick line = trend fit · ${fmtP(analysis.hrP)}`}
                 seriesList={analysis.hrSeries} color="#ff6b9d"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
             {analysis.distanceSeries && (
               <LineChart
                 title="Distance" unit={`MI · thick line = trend fit · ${fmtP(analysis.distanceP)}`}
                 seriesList={analysis.distanceSeries} color="#3fd8c7"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
           </div>
@@ -396,6 +397,7 @@ function FitnessPanel({ current, discipline }) {
           <h2 className={shared.title}>Metric Correlations <span>· scatterplot matrix</span></h2>
           <Splom
             data={analysis.rides}
+            onPointClick={r => onOpenWorkout(r.id)}
             fields={[
               { key: 'ef', label: 'EF' },
               { key: 'avgOutput', label: 'Avg W' },
@@ -458,6 +460,15 @@ export default function Peloton() {
     setUserIdx(i);
     setDiscipline('all');
     select(null);
+  };
+
+  // Chart points carry workout ids; clicking one opens that workout's
+  // detail view (for merged sessions, the first recording).
+  const openById = id => {
+    const w = (current?.workouts || []).find(x => String(x.id) === String(id));
+    if (!w) return;
+    select(w);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const charts = useMemo(() => {
@@ -615,7 +626,7 @@ export default function Peloton() {
         </section>
       )}
 
-      <FitnessPanel current={current} discipline={discipline} />
+      <FitnessPanel current={current} discipline={discipline} onOpenWorkout={openById} />
 
       <div className={s.tableWrap}>
         <table className={shared.table}>

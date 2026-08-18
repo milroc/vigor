@@ -10,7 +10,7 @@ const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745'];
 const W = 640, H = 210, PAD = { l: 44, r: 10, t: 12, b: 20 };
 const DAY = 86_400_000;
 
-export default function ZoneDays({ rides }) {
+export default function ZoneDays({ rides, onOpenWorkout }) {
   const data = rides.filter(r => r.zones?.some(v => v > 0));
   if (data.length < 2) return null;
 
@@ -18,12 +18,12 @@ export default function ZoneDays({ rides }) {
   const byDay = new Map();
   for (const r of data) {
     const day = new Date(r.start).toLocaleDateString('en-CA');
-    if (!byDay.has(day)) byDay.set(day, [0, 0, 0, 0, 0]);
-    const mins = byDay.get(day);
-    r.zones.forEach((z, i) => { mins[i] += (z || 0) / 60; });
+    if (!byDay.has(day)) byDay.set(day, { mins: [0, 0, 0, 0, 0], id: r.id });
+    const entry = byDay.get(day);
+    r.zones.forEach((z, i) => { entry.mins[i] += (z || 0) / 60; });
   }
   const days = [...byDay.entries()]
-    .map(([day, mins]) => ({ day, mins, total: mins.reduce((sum, v) => sum + v, 0) }))
+    .map(([day, { mins, id }]) => ({ day, mins, id, total: mins.reduce((sum, v) => sum + v, 0) }))
     .sort((a, b) => a.day.localeCompare(b.day));
 
   const t0 = Date.parse(days[0].day);
@@ -70,7 +70,11 @@ export default function ZoneDays({ rides }) {
                 x={x(d.day) - barW / 2} y={yTop}
                 width={barW} height={Math.max(yBot - yTop, 0.5)}
                 fill={ZONE_COLORS[z]} fillOpacity="0.9"
-              />
+                style={onOpenWorkout ? { cursor: 'pointer' } : undefined}
+                onClick={onOpenWorkout ? () => onOpenWorkout(d.id) : undefined}
+              >
+                <title>{d.day} · {Math.round(d.total)} min</title>
+              </rect>
             );
           });
         })}

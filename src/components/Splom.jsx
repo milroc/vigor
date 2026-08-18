@@ -6,7 +6,7 @@ const CELL = 108, GAP = 8, PAD = 6;
 // Scatterplot matrix: every pairwise combination of `fields` over `data`.
 // Points brighten with data order, so on date-sorted rows the newest points
 // stand out and drift across each cell as the metrics change together.
-export default function Splom({ data, fields, color = '#c6fe28' }) {
+export default function Splom({ data, fields, color = '#c6fe28', onPointClick }) {
   const n = fields.length;
   const size = n * CELL + (n - 1) * GAP;
 
@@ -54,20 +54,41 @@ export default function Splom({ data, fields, color = '#c6fe28' }) {
           }
           const pts = data
             .map((d, k) => ({ x: d[fx.key], y: d[fy.key], k }))
-            .filter(p => p.x != null && p.y != null);
+            .filter(p => p.x != null && p.y != null)
+            .map(p => ({ ...p, ax: x0 + px(fx.key, p.x), ay: y0 + CELL - px(fy.key, p.y) }));
+          // Nearest-point pick (a voronoi partition of the cell): any click
+          // in the cell opens the closest session's workout.
+          const pick = e => {
+            const svg = e.currentTarget.ownerSVGElement;
+            const rect = svg.getBoundingClientRect();
+            const vx = (e.clientX - rect.left) * (size / rect.width);
+            const vy = (e.clientY - rect.top) * (size / rect.height);
+            let best = null, bestD = Infinity;
+            for (const p of pts) {
+              const d2 = (p.ax - vx) ** 2 + (p.ay - vy) ** 2;
+              if (d2 < bestD) { bestD = d2; best = p; }
+            }
+            if (best) onPointClick(data[best.k]);
+          };
           return (
             <g key={`${fy.key}:${fx.key}`}>
               <rect x={x0} y={y0} width={CELL} height={CELL} className={s.cell} />
               {pts.map(p => (
                 <circle
                   key={p.k}
-                  cx={x0 + px(fx.key, p.x)}
-                  cy={y0 + CELL - px(fy.key, p.y)}
+                  cx={p.ax}
+                  cy={p.ay}
                   r="2.2"
                   fill={color}
                   fillOpacity={0.2 + 0.7 * (p.k / (data.length - 1 || 1))}
                 />
               ))}
+              {onPointClick && pts.length > 0 && (
+                <rect
+                  x={x0} y={y0} width={CELL} height={CELL}
+                  fill="transparent" style={{ cursor: 'pointer' }} onClick={pick}
+                />
+              )}
             </g>
           );
         }))}

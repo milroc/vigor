@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Delaunay } from 'd3-delaunay';
 import s from './LineChart.module.css';
 
 const W = 640, H = 180, PAD = { l: 44, r: 10, t: 10, b: 20 };
@@ -46,7 +47,7 @@ function latticeCells(w, h) {
   return cells;
 }
 
-export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill }) {
+export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill, onPointClick }) {
   // The plot renders in pixel space: the viewBox tracks the measured size of
   // the plot container, so text never distorts when the layout stretches it.
   const plotRef = useRef(null);
@@ -149,6 +150,18 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
     );
   }, [hexPoints, targetBand, w, h, tMin, tMax, vMin, vMax, color]);
 
+  // Click targets for scatter points: a voronoi cell per dot, so any click
+  // in the plot lands on the nearest point.
+  const dotSeries = onPointClick ? seriesList.find(ser => ser.dots && ser.samples.length > 1) : null;
+  const [hoverI, setHoverI] = useState(-1);
+  const voronoiCells = useMemo(() => {
+    if (!dotSeries) return null;
+    const pixels = dotSeries.samples.map(p => [x(p.t), y(p.v)]);
+    const vor = Delaunay.from(pixels).voronoi([PAD.l, PAD.t, w - PAD.r, h - PAD.b]);
+    return dotSeries.samples.map((_, i) => vor.renderCell(i));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dotSeries, w, h, tMin, tMax, vMin, vMax]);
+
   if (!all.length) return null;
 
   return (
@@ -198,6 +211,24 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
         <text className={s.axisLabel} x={PAD.l - 6} y={y(vMin)} textAnchor="end">{fmt(vMin)}</text>
         {xLabelLeft && <text className={s.axisLabel} x={PAD.l} y={h - PAD.b + 12} textAnchor="start">{xLabelLeft}</text>}
         {xLabel && <text className={s.axisLabel} x={w - PAD.r} y={h - PAD.b + 12} textAnchor="end">{xLabel}</text>}
+        {voronoiCells && (
+          <g>
+            {hoverI >= 0 && dotSeries.samples[hoverI] && (
+              <circle
+                cx={x(dotSeries.samples[hoverI].t)} cy={y(dotSeries.samples[hoverI].v)}
+                r="5.5" fill="none" stroke={color} strokeWidth="1.5" pointerEvents="none"
+              />
+            )}
+            {voronoiCells.map((d, i) => d && (
+              <path
+                key={i} d={d} fill="transparent" style={{ cursor: 'pointer' }}
+                onClick={() => onPointClick(dotSeries.samples[i])}
+                onMouseEnter={() => setHoverI(i)}
+                onMouseLeave={() => setHoverI(-1)}
+              />
+            ))}
+          </g>
+        )}
       </svg>
       </div>
     </div>
