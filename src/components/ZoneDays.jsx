@@ -4,7 +4,9 @@ import s from './ZoneDays.module.css';
 // stacked bar per calendar DAY (Z1 bottom → Z5 top, minutes), with all of
 // that day's sessions summed. True time axis, so training gaps stay
 // visible as empty days.
-const ZONE_COLORS = ['#8a8a7c', '#4da3ff', '#c6fe28', '#ff9d4d', '#ff4d3a'];
+// Peloton's zone palette: Z1 blue, Z2 green, Z3 yellow, Z4 orange, Z5 red
+// (hex values approximated from the app — Peloton doesn't publish them).
+const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745'];
 const W = 640, H = 210, PAD = { l: 44, r: 10, t: 12, b: 20 };
 const DAY = 86_400_000;
 
