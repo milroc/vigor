@@ -14,7 +14,12 @@ backups, and an embedded AI coach.
 ## Pages
 
 - **Lift** — connection status, workout history, weekly volume.
-- **Backup** — snapshot the machine's account data into `backups/`.
+- **Backup** — snapshot the machine's account data into `backups/`. Also backs
+  up Peloton: full workout history plus per-second performance metrics for up
+  to two household users (Peloton retired password login, so the server runs
+  the members-site OAuth + PKCE flow; credentials come from
+  `PELOTON_LOGIN`/`PELOTON_PASSWORD` and optional `_2` variants, injected via
+  `av inject +PELOTON_LOGIN +PELOTON_PASSWORD -- npm run serve`).
 - **Movement Report** — the main event: pick a movement, browse a year of
   sessions on a contribution-style calendar, drill into a set or a single rep,
   and read four synced charts (range of motion, resistance, velocity, power)

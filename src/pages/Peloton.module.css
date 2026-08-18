@@ -1,0 +1,197 @@
+/* Fit-to-viewport app pane: the page itself never scrolls on desktop —
+   the chart area and the bottom table/SPLOM pane scroll internally. */
+.main { width: 100%; padding: 20px 28px 16px; display: flex; flex-direction: column; }
+@media (min-width: 981px) {
+  .main { flex: 1; min-height: 0; overflow: hidden; }
+}
+
+.intro { color: var(--dim); line-height: 1.7; margin: 12px 0; }
+.intro strong { color: var(--text); }
+
+.error { color: var(--red); }
+
+.headRow {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px; flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px; margin-bottom: 14px;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; flex-shrink: 0; }
+.chip {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 6px 12px; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.chip:hover { border-color: var(--lime); color: var(--lime); }
+.chipActive { border-color: var(--lime); color: var(--lime); }
+
+.detail {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.modalOverlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(5, 5, 4, 0.78);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 4vh 16px;
+}
+/* Same shell principles as the page: header and stats stay put, one
+   internal scroll area for the body — the modal itself never scrolls. */
+.modal {
+  width: min(1100px, 94vw);
+  max-height: 92vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  margin-bottom: 0;
+}
+.modalScroll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.modalScroll::-webkit-scrollbar { width: 8px; }
+.modalScroll::-webkit-scrollbar-track { background: transparent; }
+.modalScroll::-webkit-scrollbar-thumb { background: var(--line); }
+.modalChartGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+@media (max-width: 900px) { .modalChartGrid { grid-template-columns: 1fr; } }
+.detailHead {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px; flex-shrink: 0;
+}
+.detailMain { flex: 1; min-width: 0; }
+
+/* Mini body figure in the modal header; hovering it opens the full
+   body-activity panel (large figure + bars) as a popover. */
+.bodyMini { position: relative; align-self: center; padding: 0 6px; }
+/* Natural render is two 92px figures (188px wide, ~245px tall); scaled
+   so the mini stays shorter than the title block and never sets the
+   header height. */
+.bodyMiniScale { width: 42px; height: 42px; overflow: hidden; }
+.bodyMiniScale > div { transform: scale(0.22); transform-origin: top left; width: 188px; }
+.bodyTip {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 30;
+  background: var(--bg); border: 1px solid var(--line);
+  padding: 16px; width: min(560px, 80vw);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+}
+.bodyTip .muscleRow { margin-bottom: 0; }
+.modal .detailHead {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.modal .stats { flex-shrink: 0; }
+.detailTitle {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+}
+.detailSub { color: var(--dim); font-size: 12px; margin-top: 4px; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 16px; }
+.statValue { font-size: 20px; font-weight: 600; color: var(--text); }
+.statValue small { font-size: 11px; color: var(--dim); }
+.statLabel {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--dim); margin-top: 2px;
+}
+
+.charts { display: flex; flex-direction: column; gap: 14px; }
+
+.muscleRow {
+  display: flex; align-items: flex-start; gap: 28px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.muscleBars { flex: 1; min-width: 240px; max-width: 420px; }
+.muscleTitle {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--dim); margin-bottom: 8px;
+}
+.muscleBar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.muscleName { width: 110px; font-size: 11px; color: var(--text); text-transform: capitalize; }
+.muscleTrack { flex: 1; height: 8px; background: var(--line); }
+.muscleFill { height: 100%; background: var(--lime); }
+.musclePct { width: 36px; font-size: 11px; color: var(--dim); text-align: right; }
+
+.fitness { margin: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.fitControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* Top row: topline metrics beside the time-in-zone chart, which stretches
+   to whatever height the metrics need (its plot has its own minHeight).
+   A divider closes the row off from the chart area below. */
+.topGrid {
+  display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.3fr);
+  gap: 24px; align-items: stretch; flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px; margin-bottom: 12px;
+}
+.topGrid .stats {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px 20px; align-content: start; margin-bottom: 0;
+}
+
+/* Middle row: p-ranked trend charts, two per row, height set by the
+   drag divider below; overflow scrolls inside the row. */
+/* The inline height from the drag divider is a preference, not a hard
+   size: on short viewports the row shrinks (to its min) so the tab pane
+   below always stays reachable. */
+.chartsScroll {
+  overflow-y: auto; min-height: 150px; flex-shrink: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.chartsScroll::-webkit-scrollbar { width: 8px; }
+.chartsScroll::-webkit-scrollbar-track { background: transparent; }
+.chartsScroll::-webkit-scrollbar-thumb { background: var(--line); }
+.chartGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+@media (max-width: 900px) {
+  .topGrid { grid-template-columns: 1fr; }
+  .chartGrid { grid-template-columns: 1fr; }
+}
+
+/* Bottom pane: tabs stay put, the tab content scrolls internally. */
+/* Real min-height so the tab bar + a few rows always survive the flex
+   squeeze on short viewports (the chart row shrinks first). */
+.bottomPane { flex: 1; min-height: 170px; display: flex; flex-direction: column; }
+.paneScroll {
+  flex: 1; min-height: 120px; overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.paneScroll::-webkit-scrollbar { width: 8px; }
+.paneScroll::-webkit-scrollbar-track { background: transparent; }
+.paneScroll::-webkit-scrollbar-thumb { background: var(--line); }
+.paneScroll thead th {
+  position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+
+.divider {
+  display: flex; align-items: center;
+  height: 16px; margin: 4px 0 14px;
+  cursor: row-resize; touch-action: none; user-select: none;
+}
+.divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.dividerGrip {
+  width: 44px; height: 5px; margin: 0 10px;
+  border-top: 1px solid var(--dim); border-bottom: 1px solid var(--dim);
+}
+.divider:hover .dividerGrip,
+.divider:active .dividerGrip { border-color: var(--lime); }
+.fitInput {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); padding: 10px 12px;
+  color-scheme: dark;
+}
+.fitInput:focus { outline: none; border-color: var(--lime); }
+
+.fitDash { color: var(--dim); }
+
+.row { cursor: pointer; }
+.rowActive td { background: rgba(198, 254, 40, 0.07); }

@@ -1,0 +1,107 @@
+import { useMemo } from 'react';
+import s from './Splom.module.css';
+
+const CELL = 108, GAP = 8, PAD = 6;
+
+// Scatterplot matrix: every pairwise combination of `fields` over `data`.
+// Points brighten with data order, so on date-sorted rows the newest points
+// stand out and drift across each cell as the metrics change together.
+export default function Splom({ data, fields, color = '#c6fe28', onPointClick, hoverId, onHover }) {
+  const n = fields.length;
+  const size = n * CELL + (n - 1) * GAP;
+
+  const ranges = useMemo(() => {
+    const out = {};
+    for (const f of fields) {
+      const vals = data.map(d => d[f.key]).filter(v => v != null);
+      let min = vals.length ? Math.min(...vals) : 0;
+      let max = vals.length ? Math.max(...vals) : 1;
+      const pad = (max - min || 1) * 0.06;
+      min -= pad; max += pad;
+      out[f.key] = { min, max };
+    }
+    return out;
+  }, [data, fields]);
+
+  if (data.length < 3) return null;
+
+  const cellX = j => j * (CELL + GAP);
+  const cellY = i => i * (CELL + GAP);
+  const px = (key, v) => {
+    const { min, max } = ranges[key];
+    return PAD + ((v - min) / (max - min)) * (CELL - 2 * PAD);
+  };
+  const fmt = v => Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(Math.abs(v) < 3 ? 2 : 1);
+
+  return (
+    <div className={s.wrap}>
+      <svg viewBox={`0 0 ${size} ${size}`} className={s.svg}>
+        {fields.map((fy, i) => fields.map((fx, j) => {
+          const x0 = cellX(j), y0 = cellY(i);
+          if (i === j) {
+            const { min, max } = ranges[fx.key];
+            return (
+              <g key={fx.key}>
+                <rect x={x0} y={y0} width={CELL} height={CELL} className={s.diag} />
+                <text x={x0 + CELL / 2} y={y0 + CELL / 2 - 2} className={s.label} textAnchor="middle">
+                  {fx.label}
+                </text>
+                <text x={x0 + CELL / 2} y={y0 + CELL / 2 + 14} className={s.range} textAnchor="middle">
+                  {fmt(min)} – {fmt(max)}
+                </text>
+              </g>
+            );
+          }
+          const pts = data
+            .map((d, k) => ({ x: d[fx.key], y: d[fy.key], k }))
+            .filter(p => p.x != null && p.y != null)
+            .map(p => ({ ...p, ax: x0 + px(fx.key, p.x), ay: y0 + CELL - px(fy.key, p.y) }));
+          // Nearest-point pick (a voronoi partition of the cell): clicks open
+          // the closest session's workout, hover mirrors it in every chart.
+          const nearest = e => {
+            const svg = e.currentTarget.ownerSVGElement;
+            const rect = svg.getBoundingClientRect();
+            const vx = (e.clientX - rect.left) * (size / rect.width);
+            const vy = (e.clientY - rect.top) * (size / rect.height);
+            let best = null, bestD = Infinity;
+            for (const p of pts) {
+              const d2 = (p.ax - vx) ** 2 + (p.ay - vy) ** 2;
+              if (d2 < bestD) { bestD = d2; best = p; }
+            }
+            return best;
+          };
+          return (
+            <g key={`${fy.key}:${fx.key}`}>
+              <rect x={x0} y={y0} width={CELL} height={CELL} className={s.cell} />
+              {pts.map(p => {
+                const hovered = hoverId != null && data[p.k].id === hoverId;
+                return (
+                  <circle
+                    key={p.k}
+                    cx={p.ax}
+                    cy={p.ay}
+                    r={hovered ? 3.4 : 2.2}
+                    fill={color}
+                    fillOpacity={hovered ? 1 : 0.2 + 0.7 * (p.k / (data.length - 1 || 1))}
+                    stroke={hovered ? '#e8e8e0' : 'none'}
+                    strokeWidth={hovered ? 1 : 0}
+                  />
+                );
+              })}
+              {onPointClick && pts.length > 0 && (
+                <rect
+                  x={x0} y={y0} width={CELL} height={CELL}
+                  fill="transparent" style={{ cursor: 'pointer' }}
+                  onClick={e => { const best = nearest(e); if (best) onPointClick(data[best.k]); }}
+                  onMouseMove={onHover ? e => onHover(nearest(e) ? data[nearest(e).k].id : null) : undefined}
+                  onMouseLeave={onHover ? () => onHover(null) : undefined}
+                />
+              )}
+            </g>
+          );
+        }))}
+      </svg>
+      <div className={s.caption}>rows = y · columns = x · brighter dots = more recent</div>
+    </div>
+  );
+}

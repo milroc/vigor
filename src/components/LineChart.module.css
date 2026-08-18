@@ -27,6 +27,7 @@
 .svg { position: absolute; inset: 0; width: 100%; height: 100%; border: 1px solid var(--line); background: rgba(17,17,16,0.6); }
 
 .axisLabel { font-family: 'IBM Plex Mono', monospace; font-size: 9px; fill: var(--dim); }
+.hoverLabel { font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 700; }
 .divLabel { font-family: 'IBM Plex Mono', monospace; font-size: 9px; fill: var(--dim); }
 
 .gridHex {
@@ -41,3 +42,16 @@
   stroke-width: 0.8;
   stroke-opacity: 0.55;
 }
+
+.scrubLine { stroke: #e8e8e0; stroke-opacity: 0.55; stroke-width: 1; stroke-dasharray: 2,3; }
+.scrubDot { stroke: #0a0a08; stroke-width: 1; }
+
+.tooltip {
+  position: absolute; top: 8px; pointer-events: none; z-index: 5;
+  background: rgba(10, 10, 8, 0.94); border: 1px solid var(--line);
+  padding: 5px 8px; white-space: nowrap;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text);
+}
+.tipT { color: var(--dim); margin-bottom: 3px; }
+.tipRow { display: flex; align-items: center; gap: 5px; }
+.tipRow i { width: 8px; height: 3px; flex-shrink: 0; }
