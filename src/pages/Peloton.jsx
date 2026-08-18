@@ -515,6 +515,8 @@ export default function Peloton() {
   const [selected, setSelected] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  // Body-activity popover on the header's mini figure.
+  const [muscleTip, setMuscleTip] = useState(false);
   const selectedIdRef = useRef(null);
 
 
@@ -556,6 +558,7 @@ export default function Peloton() {
   const select = w => {
     setSelected(w);
     setMetrics(null);
+    setMuscleTip(false);
     selectedIdRef.current = w?.id ?? null;
     if (!w) return;
     setMetricsLoading(true);
@@ -641,13 +644,52 @@ export default function Peloton() {
         <div className={s.modalOverlay} onClick={() => select(null)}>
         <section className={`${s.detail} ${s.modal}`} onClick={e => e.stopPropagation()}>
           <div className={s.detailHead}>
-            <div>
+            <div className={s.detailMain}>
               <div className={s.detailTitle}>{selected.title || selected.discipline}</div>
               <div className={s.detailSub}>
                 {[instructorOf(selected), fmtDay(selected.start), fmtLen(selected.duration_secs)]
                   .filter(Boolean).join(' · ')}
               </div>
             </div>
+            {muscles.length > 0 && (
+              <div
+                className={s.bodyMini}
+                onMouseEnter={() => setMuscleTip(true)}
+                onMouseLeave={() => setMuscleTip(false)}
+              >
+                {/* body-muscles misrenders below ~50px wide, so draw at its
+                    natural size and scale the box down. */}
+                <div className={s.bodyMiniScale}>
+                  <MuscleHighlight
+                    compact
+                    primary={muscles.filter(m => m.value >= 20 && m.type).map(m => m.type)}
+                    secondary={muscles.filter(m => m.value >= 5 && m.value < 20 && m.type).map(m => m.type)}
+                  />
+                </div>
+                {muscleTip && (
+                  <div className={s.bodyTip}>
+                    <div className={s.muscleRow}>
+                      <MuscleHighlight
+                        primary={muscles.filter(m => m.value >= 20 && m.type).map(m => m.type)}
+                        secondary={muscles.filter(m => m.value >= 5 && m.value < 20 && m.type).map(m => m.type)}
+                      />
+                      <div className={s.muscleBars}>
+                        <div className={s.muscleTitle}>Body Activity</div>
+                        {muscles.map(m => (
+                          <div key={m.name} className={s.muscleBar}>
+                            <span className={s.muscleName}>{m.name}</span>
+                            <div className={s.muscleTrack}>
+                              <div className={s.muscleFill} style={{ width: `${Math.min(m.value, 100)}%` }} />
+                            </div>
+                            <span className={s.musclePct}>{Math.round(m.value)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <button className={shared.btn} onClick={() => select(null)}>Close</button>
           </div>
           {/* Topline only — per-metric averages live on the charts below. */}
@@ -660,26 +702,6 @@ export default function Peloton() {
           </div>
 
           <div className={s.modalScroll}>
-          {muscles.length > 0 && (
-            <div className={s.muscleRow}>
-              <MuscleHighlight
-                primary={muscles.filter(m => m.value >= 20 && m.type).map(m => m.type)}
-                secondary={muscles.filter(m => m.value >= 5 && m.value < 20 && m.type).map(m => m.type)}
-              />
-              <div className={s.muscleBars}>
-                <div className={s.muscleTitle}>Body Activity</div>
-                {muscles.map(m => (
-                  <div key={m.name} className={s.muscleBar}>
-                    <span className={s.muscleName}>{m.name}</span>
-                    <div className={s.muscleTrack}>
-                      <div className={s.muscleFill} style={{ width: `${Math.min(m.value, 100)}%` }} />
-                    </div>
-                    <span className={s.musclePct}>{Math.round(m.value)}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           {metricsLoading && <p className={s.intro}>loading per-second metrics…</p>}
           {!metricsLoading && metrics && !charts.length && (
             <p className={s.intro}>

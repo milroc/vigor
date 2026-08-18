@@ -60,13 +60,14 @@ function Chart({ view, label, bodyState, width = 150, onSelect }) {
   return (
     <div className={s.figure}>
       <div ref={ref} className={onSelect ? s.chart : `${s.chart} ${s.static}`} style={{ width }} />
-      <div className={s.viewLabel}>{label}</div>
+      {label && <div className={s.viewLabel}>{label}</div>}
     </div>
   );
 }
 
 // Non-interactive variant: highlights the muscles a given exercise works.
-export function MuscleHighlight({ primary = [], secondary = [], width = 92, side = null }) {
+// compact drops the view labels and tightens the gap for inline use.
+export function MuscleHighlight({ primary = [], secondary = [], width = 92, side = null, compact = false }) {
   const p = new Set(primary), sec = new Set(secondary);
   const opposite = side === 'left' ? '-right' : side === 'right' ? '-left' : null;
   const bodyState = Object.fromEntries(
@@ -78,9 +79,9 @@ export function MuscleHighlight({ primary = [], secondary = [], width = 92, side
   );
 
   return (
-    <div className={s.wrap} style={{ gap: 10 }}>
-      <Chart view={ViewSide.FRONT} label="Front" bodyState={bodyState} width={width} />
-      <Chart view={ViewSide.BACK} label="Back" bodyState={bodyState} width={width} />
+    <div className={s.wrap} style={{ gap: compact ? 4 : 10 }}>
+      <Chart view={ViewSide.FRONT} label={compact ? null : 'Front'} bodyState={bodyState} width={width} />
+      <Chart view={ViewSide.BACK} label={compact ? null : 'Back'} bodyState={bodyState} width={width} />
     </div>
   );
 }
