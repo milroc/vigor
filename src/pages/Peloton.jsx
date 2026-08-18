@@ -99,7 +99,7 @@ const CUSTOM_SETS = {
 
 // Raw per-ride cardio analysis — every ride is its own data point, no
 // monthly averaging. Trend comes from a least-squares fit over the points.
-function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
+function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header, workouts, selectedId }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   // Weight/age/sex come from manual/profile.json — no inputs; they feed
@@ -114,6 +114,22 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
   // Shared point-hover: the hovered workout id, mirrored by every chart.
   const [hoverId, setHoverId] = useState(null);
   const onHoverPoint = id => setHoverId(prev => (prev === id ? prev : id));
+
+  // Bottom pane tab: the workout table or the correlation matrix.
+  const [tab, setTab] = useState('table');
+  // Chart-area height, adjustable by dragging the divider above the tabs.
+  const [chartsH, setChartsH] = useState(620);
+  const onDividerDown = e => {
+    e.preventDefault();
+    const startY = e.clientY, startH = chartsH;
+    const move = ev => setChartsH(Math.max(220, Math.min(1600, startH + ev.clientY - startY)));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
 
   // One dropdown selects the analysis population: custom sets, whole
   // disciplines, or repeatable classes — anything with a single workout
@@ -254,9 +270,56 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
     };
   }, [result]);
 
+  // Charts ranked by trend significance — smallest p first — and laid out
+  // two per row.
+  const chartDefs = useMemo(() => {
+    if (!analysis) return [];
+    const speed = analysis.workloadKey === 'speed';
+    return [
+      analysis.efSeries && {
+        key: 'ef', series: analysis.efSeries, color: '#c6fe28', p: analysis.efP,
+        title: speed ? 'Efficiency (speed per heartbeat)' : 'Efficiency Factor',
+        unit: `${speed ? 'MPH' : 'W'}/BPM · thick line = trend fit`,
+      },
+      analysis.intensitySeries && {
+        key: 'intensity', series: analysis.intensitySeries, color: '#b48aff', p: analysis.intensityP,
+        title: 'Intensity', unit: '%HRMAX · avg HR relative to your HRmax',
+      },
+      analysis.trimpSeries && {
+        key: 'trimp', series: analysis.trimpSeries, color: '#e07b39', p: analysis.trimpP,
+        title: 'Training Load (Edwards TRIMP)', unit: 'ZONE-WEIGHTED MINUTES',
+      },
+      analysis.vo2Series && {
+        key: 'vo2', series: analysis.vo2Series, color: '#e0c341', p: analysis.vo2P,
+        title: analysis.vo2InMlKg ? 'Estimated VO₂max' : 'Estimated Max Aerobic Power',
+        unit: (analysis.vo2InMlKg ? 'ML/KG/MIN' : 'W') + ' · HR-vs-power extrapolated to personal HRmax',
+        bands: analysis.vo2InMlKg ? vo2BandsFor(profile.age, profile.sex || 'm') : undefined,
+      },
+      analysis.hr100Series && {
+        key: 'hr100', series: analysis.hr100Series, color: '#ff9d4d', p: analysis.hr100P,
+        title: 'Predicted HR at 100W', unit: 'BPM · fixed workload, lower = fitter',
+      },
+      analysis.outputSeries && {
+        key: 'output', series: analysis.outputSeries, color: '#4da3ff', p: analysis.outputP,
+        title: speed ? 'Avg Speed (steady-state)' : 'Avg Output (steady-state)',
+        unit: `${speed ? 'MPH' : 'W'} · thick line = trend fit`,
+      },
+      analysis.hrSeries && {
+        key: 'hr', series: analysis.hrSeries, color: '#ff6b9d', p: analysis.hrP,
+        title: 'Avg Heart Rate (steady-state)', unit: 'BPM · thick line = trend fit',
+      },
+      analysis.distanceSeries && {
+        key: 'distance', series: analysis.distanceSeries, color: '#3fd8c7', p: analysis.distanceP,
+        title: 'Distance', unit: 'MI · thick line = trend fit',
+      },
+    ].filter(Boolean).sort((a, b) => (a.p ?? 1) - (b.p ?? 1));
+  }, [analysis, profile]);
+
   return (
     <section className={s.fitness}>
-      <div className={s.fitControls}>
+      <div className={s.headRow}>
+        {header}
+        <div className={s.fitControls}>
         <select className={s.fitInput} value={selection} onChange={e => setSelection(e.target.value)}>
           <option value="">all workouts · {options.total}</option>
           {options.sets.length > 0 && (
@@ -279,6 +342,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
         <span className={s.fitDash}>→</span>
         <input className={s.fitInput} type="date" value={to} onChange={e => setTo(e.target.value)} />
         {running && <span className={s.fitDash}>updating…</span>}
+        </div>
       </div>
 
       {error && <div className={s.error}>analysis failed: {error}</div>}
@@ -292,6 +356,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
 
       {analysis && (
         <>
+          <div className={s.topGrid}>
           <div className={s.stats}>
             <Stat label="rides" value={analysis.rides.length} />
             <Stat label="span" value={analysis.spanDays} unit="days" />
@@ -361,93 +426,98 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
               />
             )}
           </div>
-          <div className={s.charts}>
-            <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout}
-              hoverId={hoverId} onHover={onHoverPoint} />
-            {analysis.efSeries && (
-              <LineChart
-                title={analysis.workloadKey === 'speed' ? 'Efficiency (speed per heartbeat)' : 'Efficiency Factor'}
-                unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'}/BPM · thick line = trend fit · ${fmtP(analysis.efP)}`}
-                seriesList={analysis.efSeries} color="#c6fe28"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.intensitySeries && (
-              <LineChart
-                title="Intensity" unit={`%HRMAX · avg HR relative to your HRmax · ${fmtP(analysis.intensityP)}`}
-                seriesList={analysis.intensitySeries} color="#b48aff"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.trimpSeries && (
-              <LineChart
-                title="Training Load (Edwards TRIMP)"
-                unit={`ZONE-WEIGHTED MINUTES · ${fmtP(analysis.trimpP)}`}
-                seriesList={analysis.trimpSeries} color="#e07b39"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.vo2Series && (
-              <LineChart
-                title={analysis.vo2InMlKg ? 'Estimated VO₂max' : 'Estimated Max Aerobic Power'}
-                unit={(analysis.vo2InMlKg ? 'ML/KG/MIN' : 'W')
-                  + ` · HR-vs-power extrapolated to personal HRmax · ${fmtP(analysis.vo2P)}`}
-                seriesList={analysis.vo2Series} color="#e0c341"
-                bands={analysis.vo2InMlKg ? vo2BandsFor(profile.age, profile.sex || 'm') : undefined}
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.hr100Series && (
-              <LineChart
-                title="Predicted HR at 100W"
-                unit={`BPM · fixed workload, lower = fitter · ${fmtP(analysis.hr100P)}`}
-                seriesList={analysis.hr100Series} color="#ff9d4d"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.outputSeries && (
-              <LineChart
-                title={analysis.workloadKey === 'speed' ? 'Avg Speed (steady-state)' : 'Avg Output (steady-state)'}
-                unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'} · thick line = trend fit · ${fmtP(analysis.outputP)}`}
-                seriesList={analysis.outputSeries} color="#4da3ff"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.hrSeries && (
-              <LineChart
-                title="Avg Heart Rate (steady-state)" unit={`BPM · thick line = trend fit · ${fmtP(analysis.hrP)}`}
-                seriesList={analysis.hrSeries} color="#ff6b9d"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
-            {analysis.distanceSeries && (
-              <LineChart
-                title="Distance" unit={`MI · thick line = trend fit · ${fmtP(analysis.distanceP)}`}
-                seriesList={analysis.distanceSeries} color="#3fd8c7"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
-              />
-            )}
+          <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout}
+            hoverId={hoverId} onHover={onHoverPoint} />
           </div>
-          <p className={s.intro}>
-            p-values are two-tailed OLS slope tests and assume independent rides;
-            back-to-back rides share day effects (heat, hydration, fatigue), so
-            treat them as approximate.
-          </p>
-          <h2 className={shared.title}>Metric Correlations <span>· scatterplot matrix</span></h2>
-          <Splom
-            data={analysis.rides}
-            onPointClick={r => onOpenWorkout(r.id)}
-            hoverId={hoverId} onHover={onHoverPoint}
-            fields={[
-              { key: 'ef', label: 'EF' },
-              { key: 'avgOutput', label: 'Avg W' },
-              { key: 'avgHr', label: 'Avg HR' },
-              { key: 'maxHr', label: 'Max HR' },
-              { key: 'distance', label: 'Dist' },
-              { key: 'strive', label: 'Strive' },
-            ]}
-          />
+          <div className={s.chartsScroll} style={{ height: chartsH }}>
+            <div className={s.chartGrid}>
+              {chartDefs.map(d => (
+                <LineChart
+                  key={d.key}
+                  title={d.title} unit={`${d.unit} · ${fmtP(d.p)}`}
+                  seriesList={d.series} color={d.color} bands={d.bands}
+                  xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+                  onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT}
+                  hoverId={hoverId} onHover={onHoverPoint}
+                />
+              ))}
+            </div>
+            <p className={s.intro}>
+              charts ranked by trend significance · p-values are two-tailed OLS slope
+              tests and assume independent rides; back-to-back rides share day effects
+              (heat, hydration, fatigue), so treat them as approximate.
+            </p>
+          </div>
+          <div className={s.divider} onPointerDown={onDividerDown} title="drag to resize">
+            <span className={s.dividerGrip} />
+          </div>
         </>
+      )}
+
+      <div className={s.chips}>
+        <button
+          className={s.chip + (tab === 'table' || !analysis ? ` ${s.chipActive}` : '')}
+          onClick={() => setTab('table')}
+        >
+          Workouts · {workouts.length}
+        </button>
+        {analysis && (
+          <button
+            className={s.chip + (tab === 'splom' ? ` ${s.chipActive}` : '')}
+            onClick={() => setTab('splom')}
+          >
+            Correlations
+          </button>
+        )}
+      </div>
+
+      {tab === 'splom' && analysis ? (
+        <Splom
+          data={analysis.rides}
+          onPointClick={r => onOpenWorkout(r.id)}
+          hoverId={hoverId} onHover={onHoverPoint}
+          fields={[
+            { key: 'ef', label: 'EF' },
+            { key: 'avgOutput', label: 'Avg W' },
+            { key: 'avgHr', label: 'Avg HR' },
+            { key: 'maxHr', label: 'Max HR' },
+            { key: 'distance', label: 'Dist' },
+            { key: 'strive', label: 'Strive' },
+          ]}
+        />
+      ) : (
+        <div className={s.tableWrap}>
+          <table className={shared.table}>
+            <thead>
+              <tr>
+                <th>Date</th><th>Discipline</th><th>Class</th><th>Instructor</th>
+                <th className={shared.num}>Length</th>
+                <th className={shared.num}>Output</th>
+                <th className={shared.num}>Cal</th>
+                <th className={shared.num}>Avg HR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workouts.map(w => (
+                <tr
+                  key={w.id}
+                  className={s.row + (selectedId === w.id ? ` ${s.rowActive}` : '')}
+                  onClick={() => onOpenWorkout(w.id)}
+                >
+                  <td>{fmtDay(w.start)}</td>
+                  <td>{w.discipline}</td>
+                  <td>{w.title || '—'}</td>
+                  <td>{instructorOf(w) || '—'}</td>
+                  <td className={shared.num}>{fmtLen(w.duration_secs)}</td>
+                  <td className={shared.num}>{summary(w, 'total_output') ?? '—'}</td>
+                  <td className={shared.num}>{summary(w, 'calories') ?? '—'}</td>
+                  <td className={shared.num}>{w.avg_heart_rate ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!workouts.length && <p className={s.intro}>No workouts match this filter.</p>}
+        </div>
       )}
     </section>
   );
@@ -585,25 +655,6 @@ export default function Peloton() {
 
   return (
     <main className={s.main}>
-      <div className={s.headRow}>
-        <h2 className={shared.title}>
-          Peloton Explorer <span>· snapshot {fmtDay(current.createdAt)}</span>
-        </h2>
-        {users.length > 1 && (
-          <div className={s.chips}>
-            {users.map((u, i) => (
-              <button
-                key={u.user}
-                className={s.chip + (i === userIdx ? ` ${s.chipActive}` : '')}
-                onClick={() => switchUser(i)}
-              >
-                {u.user}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
       {selected && (
         <div className={s.modalOverlay} onClick={() => select(null)}>
         <section className={`${s.detail} ${s.modal}`} onClick={e => e.stopPropagation()}>
@@ -712,40 +763,29 @@ export default function Peloton() {
         selection={selection}
         setSelection={setSelection}
         onOpenWorkout={openById}
+        workouts={workouts}
+        selectedId={selected?.id}
+        header={(
+          <div>
+            <h2 className={shared.title}>
+              Peloton Explorer <span>· snapshot {fmtDay(current.createdAt)}</span>
+            </h2>
+            {users.length > 1 && (
+              <div className={s.chips}>
+                {users.map((u, i) => (
+                  <button
+                    key={u.user}
+                    className={s.chip + (i === userIdx ? ` ${s.chipActive}` : '')}
+                    onClick={() => switchUser(i)}
+                  >
+                    {u.user}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       />
-
-      <div className={s.tableWrap}>
-        <table className={shared.table}>
-          <thead>
-            <tr>
-              <th>Date</th><th>Discipline</th><th>Class</th><th>Instructor</th>
-              <th className={shared.num}>Length</th>
-              <th className={shared.num}>Output</th>
-              <th className={shared.num}>Cal</th>
-              <th className={shared.num}>Avg HR</th>
-            </tr>
-          </thead>
-          <tbody>
-            {workouts.map(w => (
-              <tr
-                key={w.id}
-                className={s.row + (selected?.id === w.id ? ` ${s.rowActive}` : '')}
-                onClick={() => select(w)}
-              >
-                <td>{fmtDay(w.start)}</td>
-                <td>{w.discipline}</td>
-                <td>{w.title || '—'}</td>
-                <td>{instructorOf(w) || '—'}</td>
-                <td className={shared.num}>{fmtLen(w.duration_secs)}</td>
-                <td className={shared.num}>{summary(w, 'total_output') ?? '—'}</td>
-                <td className={shared.num}>{summary(w, 'calories') ?? '—'}</td>
-                <td className={shared.num}>{w.avg_heart_rate ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!workouts.length && <p className={s.intro}>No workouts match this filter.</p>}
-      </div>
     </main>
   );
 }

@@ -1,4 +1,4 @@
-.main { max-width: 1100px; padding: 28px; }
+.main { max-width: 1320px; padding: 28px; }
 
 .intro { color: var(--dim); line-height: 1.7; margin: 12px 0; }
 .intro strong { color: var(--text); }
@@ -7,7 +7,7 @@
 
 .headRow {
   display: flex; align-items: baseline; justify-content: space-between;
-  flex-wrap: wrap; gap: 10px;
+  flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
 }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -82,8 +82,43 @@
 .muscleFill { height: 100%; background: var(--lime); }
 .musclePct { width: 36px; font-size: 11px; color: var(--dim); text-align: right; }
 
-.fitness { margin: 24px 0; }
-.fitControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+.fitness { margin: 0 0 24px; }
+.fitControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* Top row: topline metrics beside the time-in-zone chart. */
+.topGrid {
+  display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.3fr);
+  gap: 24px; align-items: start; margin-bottom: 16px;
+}
+
+/* Middle row: p-ranked trend charts, two per row, height set by the
+   drag divider below. */
+.chartsScroll {
+  overflow-y: auto; min-height: 220px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.chartsScroll::-webkit-scrollbar { width: 8px; }
+.chartsScroll::-webkit-scrollbar-track { background: transparent; }
+.chartsScroll::-webkit-scrollbar-thumb { background: var(--line); }
+.chartGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) {
+  .topGrid { grid-template-columns: 1fr; }
+  .chartGrid { grid-template-columns: 1fr; }
+}
+
+.divider {
+  display: flex; align-items: center;
+  height: 16px; margin: 4px 0 14px;
+  cursor: row-resize; touch-action: none; user-select: none;
+}
+.divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.dividerGrip {
+  width: 44px; height: 5px; margin: 0 10px;
+  border-top: 1px solid var(--dim); border-bottom: 1px solid var(--dim);
+}
+.divider:hover .dividerGrip,
+.divider:active .dividerGrip { border-color: var(--lime); }
 .fitInput {
   font-family: 'IBM Plex Mono', monospace; font-size: 12px;
   background: var(--panel); color: var(--text);
