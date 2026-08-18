@@ -34,6 +34,24 @@ const hexPath = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => {
 
 const HEX_R = 6; // one lattice for everything: background grid, target zone, density
 
+// Linear interpolation over t-sorted samples.
+function interpT(arr, t) {
+  if (t <= arr[0].t) return arr[0].v;
+  for (let i = 1; i < arr.length; i++) {
+    if (t <= arr[i].t) {
+      const a = arr[i - 1], b = arr[i];
+      return a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t || 1));
+    }
+  }
+  return arr[arr.length - 1].v;
+}
+
+// Scrub sync: hovering one chart broadcasts its t to every mounted chart;
+// receivers with the same time domain (i.e. the same chart group on the
+// page) show the scrub line and tooltip at that t.
+const scrubBus = new Set();
+const broadcastScrub = msg => { for (const fn of scrubBus) fn(msg); };
+
 // Every lattice cell whose center falls inside the plot area.
 function latticeCells(w, h) {
   const colW = HEX_R * Math.sqrt(3), rowH = HEX_R * 1.5;
@@ -47,7 +65,7 @@ function latticeCells(w, h) {
   return cells;
 }
 
-export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill, onPointClick }) {
+export default function LineChart({ title, unit, seriesList, color, dividerT, zeroLine, xLabel, xLabelLeft, fillFirst, hexPoints, targetBand, fill, onPointClick, tipT, hoverId, onHover }) {
   // The plot renders in pixel space: the viewBox tracks the measured size of
   // the plot container, so text never distorts when the layout stretches it.
   const plotRef = useRef(null);
@@ -150,10 +168,50 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
     );
   }, [hexPoints, targetBand, w, h, tMin, tMax, vMin, vMax, color]);
 
+  // X-axis scrub: pointer position maps to t only (y is ignored); synced
+  // across charts sharing this domain via the module-level bus.
+  const [scrubT, setScrubT] = useState(null);
+  const domainRef = useRef({ tMin, tMax });
+  domainRef.current = { tMin, tMax };
+  useEffect(() => {
+    const fn = msg => {
+      if (msg == null) return setScrubT(null);
+      const { tMin: a, tMax: b } = domainRef.current;
+      const eps = (b - a || 1) * 0.001;
+      setScrubT(Math.abs(msg.tMin - a) < eps && Math.abs(msg.tMax - b) < eps ? msg.t : null);
+    };
+    scrubBus.add(fn);
+    return () => scrubBus.delete(fn);
+  }, []);
+
+  const onScrubMove = e => {
+    const rect = plotRef.current.getBoundingClientRect();
+    const frac = (e.clientX - rect.left - PAD.l) / (rect.width - PAD.l - PAD.r || 1);
+    broadcastScrub({ t: tMin + Math.min(1, Math.max(0, frac)) * (tMax - tMin || 1), tMin, tMax });
+  };
+  const onScrubEnd = () => broadcastScrub(null);
+
+  // Tooltip series: explicitly labeled ones, else the boldest line (the
+  // average / trend fit) so every caller gets a sensible readout.
+  let tipSeries = seriesList.filter(ser => ser.label && ser.samples.length);
+  if (!tipSeries.length) {
+    const lines = seriesList.filter(ser => !ser.dots && ser.samples.length > 1);
+    tipSeries = lines.length
+      ? [lines.reduce((a, b) => ((b.width ?? 2) > (a.width ?? 2) ? b : a), lines[0])]
+      : [];
+  }
+  const scrub = scrubT == null || !tipSeries.length ? null : {
+    px: x(scrubT),
+    vals: tipSeries.map(ser => ({ label: ser.label, color: ser.color ?? color, v: interpT(ser.samples, scrubT) })),
+  };
+
   // Click targets for scatter points: a voronoi cell per dot, so any click
-  // in the plot lands on the nearest point.
+  // in the plot lands on the nearest point. Point hover is controlled by
+  // the parent (hoverId), so pointing at a workout in one chart rings it
+  // in every chart that plots the same workout.
   const dotSeries = onPointClick ? seriesList.find(ser => ser.dots && ser.samples.length > 1) : null;
-  const [hoverI, setHoverI] = useState(-1);
+  const hoverIdx = dotSeries && hoverId != null
+    ? dotSeries.samples.findIndex(p => p.id === hoverId) : -1;
   const voronoiCells = useMemo(() => {
     if (!dotSeries) return null;
     const pixels = dotSeries.samples.map(p => [x(p.t), y(p.v)]);
@@ -167,7 +225,7 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
   return (
     <div className={s.wrap + (fill ? ` ${s.fill}` : '')}>
       <div className={s.name}>{title}<span>{unit}</span></div>
-      <div className={s.plot} ref={plotRef}>
+      <div className={s.plot} ref={plotRef} onPointerMove={onScrubMove} onPointerLeave={onScrubEnd}>
       <svg className={s.svg} data-chart viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -213,23 +271,67 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
         {xLabel && <text className={s.axisLabel} x={w - PAD.r} y={h - PAD.b + 12} textAnchor="end">{xLabel}</text>}
         {voronoiCells && (
           <g>
-            {hoverI >= 0 && dotSeries.samples[hoverI] && (
-              <circle
-                cx={x(dotSeries.samples[hoverI].t)} cy={y(dotSeries.samples[hoverI].v)}
-                r="5.5" fill="none" stroke={color} strokeWidth="1.5" pointerEvents="none"
-              />
-            )}
+            {hoverIdx >= 0 && (() => {
+              // Dotted guides to both axes with the observed values.
+              const p = dotSeries.samples[hoverIdx];
+              const hx = x(p.t), hy = y(p.v);
+              const yTxt = String(fmt(p.v));
+              const xTxt = p.dateLabel ?? String(fmt(p.t));
+              return (
+                <g pointerEvents="none">
+                  <line x1={PAD.l} x2={hx} y1={hy} y2={hy}
+                    stroke={color} strokeDasharray="2,3" strokeOpacity="0.8" />
+                  <line x1={hx} x2={hx} y1={hy} y2={h - PAD.b}
+                    stroke={color} strokeDasharray="2,3" strokeOpacity="0.8" />
+                  <circle cx={hx} cy={hy} r="5.5" fill="none" stroke={color} strokeWidth="1.5" />
+                  <rect x={PAD.l + 2} y={hy - 15} width={yTxt.length * 6.4 + 8} height={13}
+                    fill="#0a0a08" fillOpacity="0.9" />
+                  <text className={s.hoverLabel} x={PAD.l + 6} y={hy - 5} fill={color}>{yTxt}</text>
+                  <rect x={hx - (xTxt.length * 6.4 + 8) / 2} y={h - PAD.b + 2}
+                    width={xTxt.length * 6.4 + 8} height={13} fill="#0a0a08" fillOpacity="0.9" />
+                  <text className={s.hoverLabel} x={hx} y={h - PAD.b + 12}
+                    textAnchor="middle" fill={color}>{xTxt}</text>
+                </g>
+              );
+            })()}
             {voronoiCells.map((d, i) => d && (
               <path
                 key={i} d={d} fill="transparent" style={{ cursor: 'pointer' }}
                 onClick={() => onPointClick(dotSeries.samples[i])}
-                onMouseEnter={() => setHoverI(i)}
-                onMouseLeave={() => setHoverI(-1)}
+                onMouseEnter={() => onHover?.(dotSeries.samples[i].id)}
+                onMouseLeave={() => onHover?.(null)}
               />
             ))}
           </g>
         )}
+        {scrub && (
+          <g pointerEvents="none">
+            <line className={s.scrubLine} x1={scrub.px} x2={scrub.px} y1={PAD.t} y2={h - PAD.b} />
+            {scrub.vals.map((d, i) => (
+              <circle key={i} className={s.scrubDot} cx={scrub.px} cy={y(d.v)} r="3" fill={d.color} />
+            ))}
+          </g>
+        )}
       </svg>
+      {scrub && (
+        <div
+          className={s.tooltip}
+          style={{
+            left: scrub.px,
+            transform: scrub.px > w * 0.72 ? 'translateX(calc(-100% - 10px))' : 'translateX(10px)',
+          }}
+        >
+          <div className={s.tipT}>
+            {(tipT ?? (t => `${t >= 0 ? '+' : ''}${t.toFixed(2)}s`))(scrubT)}
+          </div>
+          {scrub.vals.map((d, i) => (
+            <div key={i} className={s.tipRow}>
+              <i style={{ background: d.color }} />
+              {d.label ? `${d.label} ` : ''}{fmt(d.v)}
+            </div>
+          ))}
+        </div>
+      )}
       </div>
     </div>
   );

@@ -87,6 +87,9 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
+  // Shared point-hover: the hovered workout id, mirrored by every chart.
+  const [hoverId, setHoverId] = useState(null);
+  const onHoverPoint = id => setHoverId(prev => (prev === id ? prev : id));
 
   const titles = useMemo(() => {
     const counts = new Map();
@@ -141,7 +144,9 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
     // Dots for the raw points, least-squares line for the trend. Each point
     // carries its workout id so charts can open the workout on click.
     const scatter = key => {
-      const pts = rides.map(r => ({ t: tOf(r), v: r[key], id: r.id })).filter(p => p.v != null);
+      const pts = rides
+        .map(r => ({ t: tOf(r), v: r[key], id: r.id, dateLabel: String(r.start).slice(0, 10) }))
+        .filter(p => p.v != null);
       if (pts.length < 3) return null;
       const mx = mean(pts.map(p => p.t)), my = mean(pts.map(p => p.v));
       const slope = pts.reduce((sum, p) => sum + (p.t - mx) * (p.v - my), 0)
@@ -207,6 +212,8 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
       spanDays: Math.round(tMax),
       xLeft: rides[0].start.slice(0, 10),
       xRight: rides[rides.length - 1].start.slice(0, 10),
+      tipT: t => new Date(t0 + t * DAY).toLocaleDateString(undefined,
+        { month: 'short', day: 'numeric', year: '2-digit' }),
     };
   }, [result]);
 
@@ -325,20 +332,21 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
             )}
           </div>
           <div className={s.charts}>
-            <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout} />
+            <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout}
+              hoverId={hoverId} onHover={onHoverPoint} />
             {analysis.efSeries && (
               <LineChart
                 title={analysis.workloadKey === 'speed' ? 'Efficiency (speed per heartbeat)' : 'Efficiency Factor'}
                 unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'}/BPM · thick line = trend fit · ${fmtP(analysis.efP)}`}
                 seriesList={analysis.efSeries} color="#c6fe28"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.intensitySeries && (
               <LineChart
                 title="Intensity" unit={`%HRMAX · avg HR relative to your HRmax · ${fmtP(analysis.intensityP)}`}
                 seriesList={analysis.intensitySeries} color="#b48aff"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.trimpSeries && (
@@ -346,7 +354,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 title="Training Load (Edwards TRIMP)"
                 unit={`ZONE-WEIGHTED MINUTES · ${fmtP(analysis.trimpP)}`}
                 seriesList={analysis.trimpSeries} color="#e07b39"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.vo2Series && (
@@ -355,7 +363,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 unit={(analysis.vo2InMlKg ? 'ML/KG/MIN' : 'W')
                   + ` · HR-vs-power extrapolated to personal HRmax · ${fmtP(analysis.vo2P)}`}
                 seriesList={analysis.vo2Series} color="#e0c341"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.hr100Series && (
@@ -363,7 +371,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 title="Predicted HR at 100W"
                 unit={`BPM · fixed workload, lower = fitter · ${fmtP(analysis.hr100P)}`}
                 seriesList={analysis.hr100Series} color="#ff9d4d"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.outputSeries && (
@@ -371,21 +379,21 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 title={analysis.workloadKey === 'speed' ? 'Avg Speed (steady-state)' : 'Avg Output (steady-state)'}
                 unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'} · thick line = trend fit · ${fmtP(analysis.outputP)}`}
                 seriesList={analysis.outputSeries} color="#4da3ff"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.hrSeries && (
               <LineChart
                 title="Avg Heart Rate (steady-state)" unit={`BPM · thick line = trend fit · ${fmtP(analysis.hrP)}`}
                 seriesList={analysis.hrSeries} color="#ff6b9d"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
             {analysis.distanceSeries && (
               <LineChart
                 title="Distance" unit={`MI · thick line = trend fit · ${fmtP(analysis.distanceP)}`}
                 seriesList={analysis.distanceSeries} color="#3fd8c7"
-                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
           </div>
@@ -398,6 +406,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
           <Splom
             data={analysis.rides}
             onPointClick={r => onOpenWorkout(r.id)}
+            hoverId={hoverId} onHover={onHoverPoint}
             fields={[
               { key: 'ef', label: 'EF' },
               { key: 'avgOutput', label: 'Avg W' },
@@ -632,6 +641,7 @@ export default function Peloton() {
                 fillFirst
                 xLabel={fmtLen(selected.duration_secs)}
                 xLabelLeft="0:00"
+                tipT={t => fmtZone(Math.max(0, Math.round(t)))}
               />
             ))}
           </div>

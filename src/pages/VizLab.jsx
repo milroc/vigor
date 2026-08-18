@@ -255,8 +255,8 @@ export default function VizLab() {
   const seriesFor = key => [
     ...otherReps.map(rep => ({ samples: rep[key], color: GRAY, opacity: 0.22, width: 1 })),
     ...reps.map(r => ({ samples: r[key], opacity: 0.1, width: 1.5 })),
-    ...(setAvg ? [{ samples: setAvg[key], opacity: 1, width: 2.5 }] : []),
-    ...(showcase ? [{ samples: showcase[key], color: '#ffffff', opacity: 1, width: 2.2 }] : []),
+    ...(setAvg ? [{ samples: setAvg[key], opacity: 1, width: 2.5, label: 'set avg' }] : []),
+    ...(showcase ? [{ samples: showcase[key], color: '#ffffff', opacity: 1, width: 2.2, label: `R${eff.rep + 1}` }] : []),
   ];
 
   return (

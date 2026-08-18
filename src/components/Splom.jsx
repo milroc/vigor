@@ -6,7 +6,7 @@ const CELL = 108, GAP = 8, PAD = 6;
 // Scatterplot matrix: every pairwise combination of `fields` over `data`.
 // Points brighten with data order, so on date-sorted rows the newest points
 // stand out and drift across each cell as the metrics change together.
-export default function Splom({ data, fields, color = '#c6fe28', onPointClick }) {
+export default function Splom({ data, fields, color = '#c6fe28', onPointClick, hoverId, onHover }) {
   const n = fields.length;
   const size = n * CELL + (n - 1) * GAP;
 
@@ -56,9 +56,9 @@ export default function Splom({ data, fields, color = '#c6fe28', onPointClick })
             .map((d, k) => ({ x: d[fx.key], y: d[fy.key], k }))
             .filter(p => p.x != null && p.y != null)
             .map(p => ({ ...p, ax: x0 + px(fx.key, p.x), ay: y0 + CELL - px(fy.key, p.y) }));
-          // Nearest-point pick (a voronoi partition of the cell): any click
-          // in the cell opens the closest session's workout.
-          const pick = e => {
+          // Nearest-point pick (a voronoi partition of the cell): clicks open
+          // the closest session's workout, hover mirrors it in every chart.
+          const nearest = e => {
             const svg = e.currentTarget.ownerSVGElement;
             const rect = svg.getBoundingClientRect();
             const vx = (e.clientX - rect.left) * (size / rect.width);
@@ -68,25 +68,33 @@ export default function Splom({ data, fields, color = '#c6fe28', onPointClick })
               const d2 = (p.ax - vx) ** 2 + (p.ay - vy) ** 2;
               if (d2 < bestD) { bestD = d2; best = p; }
             }
-            if (best) onPointClick(data[best.k]);
+            return best;
           };
           return (
             <g key={`${fy.key}:${fx.key}`}>
               <rect x={x0} y={y0} width={CELL} height={CELL} className={s.cell} />
-              {pts.map(p => (
-                <circle
-                  key={p.k}
-                  cx={p.ax}
-                  cy={p.ay}
-                  r="2.2"
-                  fill={color}
-                  fillOpacity={0.2 + 0.7 * (p.k / (data.length - 1 || 1))}
-                />
-              ))}
+              {pts.map(p => {
+                const hovered = hoverId != null && data[p.k].id === hoverId;
+                return (
+                  <circle
+                    key={p.k}
+                    cx={p.ax}
+                    cy={p.ay}
+                    r={hovered ? 3.4 : 2.2}
+                    fill={color}
+                    fillOpacity={hovered ? 1 : 0.2 + 0.7 * (p.k / (data.length - 1 || 1))}
+                    stroke={hovered ? '#e8e8e0' : 'none'}
+                    strokeWidth={hovered ? 1 : 0}
+                  />
+                );
+              })}
               {onPointClick && pts.length > 0 && (
                 <rect
                   x={x0} y={y0} width={CELL} height={CELL}
-                  fill="transparent" style={{ cursor: 'pointer' }} onClick={pick}
+                  fill="transparent" style={{ cursor: 'pointer' }}
+                  onClick={e => { const best = nearest(e); if (best) onPointClick(data[best.k]); }}
+                  onMouseMove={onHover ? e => onHover(nearest(e) ? data[nearest(e).k].id : null) : undefined}
+                  onMouseLeave={onHover ? () => onHover(null) : undefined}
                 />
               )}
             </g>

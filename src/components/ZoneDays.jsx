@@ -11,7 +11,7 @@ const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745'];
 const W = 640, H = 210, PAD = { l: 44, r: 10, t: 12, b: 20 };
 const DAY = 86_400_000;
 
-export default function ZoneDays({ rides, onOpenWorkout }) {
+export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
   const [choice, setChoice] = useState(null);
   const data = rides.filter(r => r.zones?.some(v => v > 0));
   if (data.length < 2) return null;
@@ -46,7 +46,7 @@ export default function ZoneDays({ rides, onOpenWorkout }) {
   const barW = Math.max(2, Math.min(10, ((W - PAD.l - PAD.r) / (tMax + 1)) * 0.8));
   const grid = [0.25, 0.5, 0.75].map(f => (maxTotal / 1.06) * f);
 
-  const pickDay = e => {
+  const nearestDay = e => {
     const svg = e.currentTarget.ownerSVGElement;
     const rect = svg.getBoundingClientRect();
     const vx = (e.clientX - rect.left) * (W / rect.width);
@@ -55,6 +55,10 @@ export default function ZoneDays({ rides, onOpenWorkout }) {
       const dist = Math.abs(x(d.day) - vx);
       if (dist < bestD) { bestD = dist; best = d; }
     }
+    return best;
+  };
+  const pickDay = e => {
+    const best = nearestDay(e);
     if (!best) return;
     if (best.sessions.length === 1) onOpenWorkout(best.sessions[0].id);
     else setChoice(best);
@@ -84,6 +88,7 @@ export default function ZoneDays({ rides, onOpenWorkout }) {
         ))}
         <line x1={PAD.l} x2={W - PAD.r} y1={y(0)} y2={y(0)} stroke="#23231e" />
         {days.map(d => {
+          const hovered = hoverId != null && d.sessions.some(sess => sess.id === hoverId);
           let acc = 0;
           return d.mins.map((m, z) => {
             if (m <= 0) return null;
@@ -94,7 +99,8 @@ export default function ZoneDays({ rides, onOpenWorkout }) {
                 key={`${d.day}:${z}`}
                 x={x(d.day) - barW / 2} y={yTop}
                 width={barW} height={Math.max(yBot - yTop, 0.5)}
-                fill={ZONE_COLORS[z]} fillOpacity="0.9"
+                fill={ZONE_COLORS[z]} fillOpacity={hovered ? 1 : 0.9}
+                stroke={hovered ? '#e8e8e0' : 'none'} strokeWidth={hovered ? 1 : 0}
               >
                 <title>{d.day} · {Math.round(d.total)} min</title>
               </rect>
@@ -109,6 +115,8 @@ export default function ZoneDays({ rides, onOpenWorkout }) {
           <rect
             x={PAD.l} y={PAD.t} width={W - PAD.l - PAD.r} height={H - PAD.t - PAD.b}
             fill="transparent" style={{ cursor: 'pointer' }} onClick={pickDay}
+            onMouseMove={onHover ? e => onHover(nearestDay(e)?.sessions[0]?.id ?? null) : undefined}
+            onMouseLeave={onHover ? () => onHover(null) : undefined}
           />
         )}
       </svg>

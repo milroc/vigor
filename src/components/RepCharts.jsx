@@ -24,7 +24,7 @@ export default function RepCharts({ telemRows, apiReps, targets }) {
 
   const seriesFor = key => [
     ...perRep.map(r => ({ samples: r[key], opacity: 0.1, width: 1.5 })),
-    { samples: avgSeries[key], opacity: 1, width: 2.5 },
+    { samples: avgSeries[key], opacity: 1, width: 2.5, label: 'avg' },
   ];
 
   return (
