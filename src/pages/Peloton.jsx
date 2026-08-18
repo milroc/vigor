@@ -30,6 +30,7 @@ const instructorOf = w =>
   w.instructor && w.instructor.toLowerCase() !== (w.title || '').toLowerCase()
     ? w.instructor : null;
 const fmtZone = secs => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+const fmtHours = secs => (secs / 3600).toFixed(secs >= 36_000 ? 1 : 2);
 
 // Peloton muscle group name → Cortex typeId used by the shared body figure.
 const MUSCLE_TYPE = [
@@ -316,7 +317,8 @@ function FitnessPanel({ current, discipline }) {
               <Stat
                 key={i}
                 label={`zone ${i + 1} total`}
-                value={secs > 0 ? fmtZone(Math.round(secs)) : null}
+                value={secs > 0 ? fmtHours(secs) : null}
+                unit="h"
               />
             ))}
             <Stat
