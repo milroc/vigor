@@ -325,6 +325,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
             )}
           </div>
           <div className={s.charts}>
+            <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout} />
             {analysis.efSeries && (
               <LineChart
                 title={analysis.workloadKey === 'speed' ? 'Efficiency (speed per heartbeat)' : 'Efficiency Factor'}
@@ -348,7 +349,6 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)}
               />
             )}
-            <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout} />
             {analysis.vo2Series && (
               <LineChart
                 title={analysis.vo2InMlKg ? 'Estimated VO₂max' : 'Estimated Max Aerobic Power'}
@@ -463,13 +463,24 @@ export default function Peloton() {
   };
 
   // Chart points carry workout ids; clicking one opens that workout's
-  // detail view (for merged sessions, the first recording).
+  // detail modal (for merged sessions, the first recording).
   const openById = id => {
     const w = (current?.workouts || []).find(x => String(x.id) === String(id));
-    if (!w) return;
-    select(w);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (w) select(w);
   };
+
+  // Modal behavior: Escape closes, page scroll locks while open.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = e => { if (e.key === 'Escape') select(null); };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   const charts = useMemo(() => {
     if (!metrics?.metrics?.length) return [];
@@ -548,7 +559,8 @@ export default function Peloton() {
       </div>
 
       {selected && (
-        <section className={s.detail}>
+        <div className={s.modalOverlay} onClick={() => select(null)}>
+        <section className={`${s.detail} ${s.modal}`} onClick={e => e.stopPropagation()}>
           <div className={s.detailHead}>
             <div>
               <div className={s.detailTitle}>{selected.title || selected.discipline}</div>
@@ -624,6 +636,7 @@ export default function Peloton() {
             ))}
           </div>
         </section>
+        </div>
       )}
 
       <FitnessPanel current={current} discipline={discipline} onOpenWorkout={openById} />
