@@ -1,4 +1,31 @@
-.wrap { width: 100%; }
+.wrap { width: 100%; position: relative; }
+
+.chooserBackdrop {
+  position: absolute; inset: 0; z-index: 5;
+  background: rgba(5, 5, 4, 0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+.chooser {
+  background: var(--panel);
+  border: 1px solid var(--lime);
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  max-width: 340px;
+}
+.chooserTitle {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--dim); margin-bottom: 4px;
+}
+.chooserItem {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; text-align: left;
+  background: transparent; color: var(--text);
+  border: 1px solid var(--line);
+  padding: 8px 10px; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.chooserItem:hover { border-color: var(--lime); color: var(--lime); }
 
 .name {
   font-family: 'IBM Plex Mono', monospace;
