@@ -86,8 +86,6 @@
   color-scheme: dark;
 }
 .fitInput:focus { outline: none; border-color: var(--lime); }
-.fitWeight { width: 110px; }
-.fitAge { width: 72px; }
 
 /* Same height and voice as the other fitness controls, with the accent
    reserved for the action. */

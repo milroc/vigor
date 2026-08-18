@@ -99,22 +99,14 @@ const CUSTOM_SETS = {
 
 // Raw per-ride cardio analysis — every ride is its own data point, no
 // monthly averaging. Trend comes from a least-squares fit over the points.
-function FitnessPanel({ current, discipline, onOpenWorkout }) {
-  const [title, setTitle] = useState('');
+function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [weight, setWeight] = useState(() => localStorage.getItem('peloWeightLbs') || '');
-  const [age, setAge] = useState(() => localStorage.getItem('peloAge') || '');
-  const [sex, setSex] = useState(() => localStorage.getItem('peloSex') || 'm');
-
-  // manual/profile.json is the source of truth for these; inputs remain
-  // as session overrides.
+  // Weight/age/sex come from manual/profile.json — no inputs; they feed
+  // the VO2max conversion and target bands only.
+  const [profile, setProfile] = useState({});
   useEffect(() => {
-    getProfile().then(p => {
-      if (p.weightLbs != null) setWeight(String(p.weightLbs));
-      if (p.age != null) setAge(String(p.age));
-      if (p.sex) setSex(p.sex);
-    }).catch(() => {});
+    getProfile().then(setProfile).catch(() => {});
   }, []);
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
@@ -123,38 +115,45 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
   const [hoverId, setHoverId] = useState(null);
   const onHoverPoint = id => setHoverId(prev => (prev === id ? prev : id));
 
-  const titles = useMemo(() => {
-    const counts = new Map();
-    for (const w of current?.workouts || []) {
-      if (discipline !== 'all' && w.discipline !== discipline) continue;
+  // One dropdown selects the analysis population: custom sets, whole
+  // disciplines, or repeatable classes — anything with a single workout
+  // can't trend, so it's dropped.
+  const options = useMemo(() => {
+    const ws = current?.workouts || [];
+    const discCounts = new Map(), titleCounts = new Map();
+    for (const w of ws) {
+      discCounts.set(w.discipline, (discCounts.get(w.discipline) || 0) + 1);
       const t = w.title || '(untitled)';
-      counts.set(t, (counts.get(t) || 0) + 1);
+      titleCounts.set(t, (titleCounts.get(t) || 0) + 1);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [current, discipline]);
+    return {
+      total: ws.length,
+      sets: Object.entries(CUSTOM_SETS)
+        .map(([key, set]) => [key, set.label, ws.filter(set.matches).length])
+        .filter(([, , n]) => n > 1),
+      discs: [...discCounts.entries()].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]),
+      titles: [...titleCounts.entries()].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]),
+    };
+  }, [current]);
 
-  useEffect(() => {
-    setResult(null);
-    setTitle(titles.find(([t]) => t === '20 min Beginner Ride') ? '20 min Beginner Ride' : '');
-  }, [titles]);
+  useEffect(() => { setResult(null); }, [selection, current]);
 
   const run = async () => {
     setRunning(true);
     setError(null);
-    localStorage.setItem('peloWeightLbs', weight);
-    const set = CUSTOM_SETS[title];
+    const set = CUSTOM_SETS[selection];
+    const base = { from, to, weightLbs: profile.weightLbs ?? '' };
     try {
       setResult(await getPelotonFitness(current.dir, set
         ? {
-          from, to, weightLbs: weight,
+          ...base,
           disciplines: set.disciplines.join(','),
           minSecs: set.minSecs, maxSecs: set.maxSecs,
           mergeGapMins: set.mergeGapMins,
         }
-        : {
-          title, from, to, weightLbs: weight,
-          discipline: discipline === 'all' ? '' : discipline,
-        }));
+        : selection.startsWith('disc:')
+          ? { ...base, discipline: selection.slice(5) }
+          : { ...base, title: selection }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -250,37 +249,27 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
     <section className={s.fitness}>
       <h2 className={shared.title}>Cardio Fitness <span>· raw per-ride, no smoothing</span></h2>
       <div className={s.fitControls}>
-        <select className={s.fitInput} value={title} onChange={e => setTitle(e.target.value)}>
-          <option value="">all classes{discipline !== 'all' ? ` (${discipline})` : ''}</option>
-          {Object.entries(CUSTOM_SETS).map(([key, set]) => (
-            <option key={key} value={key}>
-              {set.label} · {(current?.workouts || []).filter(set.matches).length}
-            </option>
-          ))}
-          {titles.map(([t, n]) => <option key={t} value={t}>{t} · {n}</option>)}
+        <select className={s.fitInput} value={selection} onChange={e => setSelection(e.target.value)}>
+          <option value="">all workouts · {options.total}</option>
+          {options.sets.length > 0 && (
+            <optgroup label="Sets">
+              {options.sets.map(([key, label, n]) => (
+                <option key={key} value={key}>{label} · {n}</option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="Disciplines">
+            {options.discs.map(([d, n]) => (
+              <option key={d} value={`disc:${d}`}>{d} · {n}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Classes">
+            {options.titles.map(([t, n]) => <option key={t} value={t}>{t} · {n}</option>)}
+          </optgroup>
         </select>
         <input className={s.fitInput} type="date" value={from} onChange={e => setFrom(e.target.value)} />
         <span className={s.fitDash}>→</span>
         <input className={s.fitInput} type="date" value={to} onChange={e => setTo(e.target.value)} />
-        <input
-          className={`${s.fitInput} ${s.fitWeight}`} type="number" min="50" max="500"
-          placeholder="weight lbs" title="Body weight, used only for the VO₂max estimate"
-          value={weight} onChange={e => setWeight(e.target.value)}
-        />
-        <input
-          className={`${s.fitInput} ${s.fitAge}`} type="number" min="18" max="90"
-          placeholder="age" title="Age, used only for the VO₂max target bands"
-          value={age}
-          onChange={e => { setAge(e.target.value); localStorage.setItem('peloAge', e.target.value); }}
-        />
-        <select
-          className={s.fitInput} value={sex}
-          title="Sex, used only for the VO₂max target bands"
-          onChange={e => { setSex(e.target.value); localStorage.setItem('peloSex', e.target.value); }}
-        >
-          <option value="m">M</option>
-          <option value="f">F</option>
-        </select>
         <button className={s.fitBtn} onClick={run} disabled={running}>
           {running ? 'Running…' : 'Run Analysis'}
         </button>
@@ -398,7 +387,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 unit={(analysis.vo2InMlKg ? 'ML/KG/MIN' : 'W')
                   + ` · HR-vs-power extrapolated to personal HRmax · ${fmtP(analysis.vo2P)}`}
                 seriesList={analysis.vo2Series} color="#e0c341"
-                bands={analysis.vo2InMlKg ? vo2BandsFor(age, sex) : undefined}
+                bands={analysis.vo2InMlKg ? vo2BandsFor(profile.age, profile.sex || 'm') : undefined}
                 xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}
@@ -462,7 +451,9 @@ export default function Peloton() {
   const [users, setUsers] = useState(null);
   const [error, setError] = useState(null);
   const [userIdx, setUserIdx] = useState(0);
-  const [discipline, setDiscipline] = useState('all');
+  // Unified analysis selection: '' (all), a CUSTOM_SETS key, 'disc:<name>',
+  // or a class title. Drives both the fitness panel and the workout table.
+  const [selection, setSelection] = useState('');
   const [selected, setSelected] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -483,17 +474,25 @@ export default function Peloton() {
     return pool.length ? pool[Math.min(2, pool.length - 1)] : null;
   }, [current]);
 
-  const disciplines = useMemo(() => {
-    const counts = new Map();
-    for (const w of current?.workouts || []) {
-      counts.set(w.discipline, (counts.get(w.discipline) || 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  // Default the selection to the flagship repeatable class when it exists.
+  useEffect(() => {
+    const n = (current?.workouts || []).filter(w => w.title === '20 min Beginner Ride').length;
+    setSelection(n > 1 ? '20 min Beginner Ride' : '');
   }, [current]);
 
+  const matcher = useMemo(() => {
+    if (!selection) return () => true;
+    if (CUSTOM_SETS[selection]) return CUSTOM_SETS[selection].matches;
+    if (selection.startsWith('disc:')) {
+      const d = selection.slice(5);
+      return w => w.discipline === d;
+    }
+    return w => (w.title || '') === selection;
+  }, [selection]);
+
   const workouts = useMemo(
-    () => (current?.workouts || []).filter(w => discipline === 'all' || w.discipline === discipline),
-    [current, discipline]
+    () => (current?.workouts || []).filter(matcher),
+    [current, matcher]
   );
 
   const select = w => {
@@ -513,7 +512,6 @@ export default function Peloton() {
 
   const switchUser = i => {
     setUserIdx(i);
-    setDiscipline('all');
     select(null);
   };
 
@@ -593,24 +591,6 @@ export default function Peloton() {
             ))}
           </div>
         )}
-      </div>
-
-      <div className={s.chips}>
-        <button
-          className={s.chip + (discipline === 'all' ? ` ${s.chipActive}` : '')}
-          onClick={() => setDiscipline('all')}
-        >
-          all · {current.workouts.length}
-        </button>
-        {disciplines.map(([d, n]) => (
-          <button
-            key={d}
-            className={s.chip + (discipline === d ? ` ${s.chipActive}` : '')}
-            onClick={() => setDiscipline(d)}
-          >
-            {d} · {n}
-          </button>
-        ))}
       </div>
 
       {selected && (
@@ -716,7 +696,12 @@ export default function Peloton() {
         </div>
       )}
 
-      <FitnessPanel current={current} discipline={discipline} onOpenWorkout={openById} />
+      <FitnessPanel
+        current={current}
+        selection={selection}
+        setSelection={setSelection}
+        onOpenWorkout={openById}
+      />
 
       <div className={s.tableWrap}>
         <table className={shared.table}>
