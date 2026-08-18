@@ -128,11 +128,10 @@ function FitnessPanel({ current, discipline }) {
     setError(null);
     localStorage.setItem('peloWeightLbs', weight);
     try {
-      const { rides } = await getPelotonFitness(current.dir, {
+      setResult(await getPelotonFitness(current.dir, {
         title, from, to, weightLbs: weight,
         discipline: discipline === 'all' ? '' : discipline,
-      });
-      setResult(rides);
+      }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -141,8 +140,11 @@ function FitnessPanel({ current, discipline }) {
   };
 
   const analysis = useMemo(() => {
-    const rides = (result || []).filter(r => r.ef != null);
+    // Heart rate is the only hard requirement; workload metrics (EF, VO2,
+    // HR@100W) appear when the discipline records a workload.
+    const rides = (result?.rides || []).filter(r => r.avgHr != null);
     if (rides.length < 3) return null;
+    const workloadKey = result.workloadKey;
     const t0 = new Date(rides[0].start).getTime();
     const tOf = r => (new Date(r.start).getTime() - t0) / DAY;
     const tMax = tOf(rides[rides.length - 1]);
@@ -178,16 +180,19 @@ function FitnessPanel({ current, discipline }) {
     };
 
     const ef = scatter('ef');
-    if (!ef) return null;
     const vo2 = scatter('vo2') || scatter('wAtHrMax');
     const vo2InMlKg = rides.some(r => r.vo2 != null);
     const hr100 = scatter('hrAt100');
     const output = scatter('avgOutput'), hrSc = scatter('avgHr'), dist = scatter('distance');
+    const intensity = scatter('pctHrMax'), trimp = scatter('trimp');
     const sum = key => rides.reduce((total, r) => total + (r[key] || 0), 0);
+    const zoneTotals = [0, 1, 2, 3, 4].map(i =>
+      rides.reduce((total, r) => total + (r.zones?.[i] || 0), 0));
     const hrs = rides.map(r => r.avgHr).filter(v => v != null).sort((a, b) => a - b);
     return {
       rides,
-      efSeries: ef.series, efP: ef.p,
+      workloadKey,
+      efSeries: ef?.series, efP: ef?.p,
       outputSeries: output?.series, outputP: output?.p,
       hrSeries: hrSc?.series, hrP: hrSc?.p,
       distanceSeries: dist?.series, distanceP: dist?.p,
@@ -197,9 +202,13 @@ function FitnessPanel({ current, discipline }) {
       vo2FitStart: vo2?.fitStart, vo2FitEnd: vo2?.fitEnd,
       hr100Series: hr100?.series, hr100P: hr100?.p,
       hr100FitStart: hr100?.fitStart, hr100FitEnd: hr100?.fitEnd,
-      slopePerMonth: ef.slopePerMonth,
-      efTotalPct: ((ef.fitEnd - ef.fitStart) / ef.fitStart) * 100,
-      fitStart: ef.fitStart, fitEnd: ef.fitEnd,
+      intensitySeries: intensity?.series, intensityP: intensity?.p,
+      intensityFitStart: intensity?.fitStart, intensityFitEnd: intensity?.fitEnd,
+      trimpSeries: trimp?.series, trimpP: trimp?.p,
+      zoneTotals,
+      slopePerMonth: ef?.slopePerMonth,
+      efTotalPct: ef ? ((ef.fitEnd - ef.fitStart) / ef.fitStart) * 100 : null,
+      fitStart: ef?.fitStart, fitEnd: ef?.fitEnd,
       totalDistance: sum('distance'),
       totalOutput: sum('totalOutput'),
       totalCalories: sum('calories'),
@@ -236,8 +245,9 @@ function FitnessPanel({ current, discipline }) {
       {error && <div className={s.error}>analysis failed: {error}</div>}
       {result && !analysis && (
         <p className={s.intro}>
-          Only {result.filter(r => r.ef != null).length} ride(s) with usable heart-rate data
-          in this range — need at least 3 for a trend.
+          Only {result.rides.filter(r => r.avgHr != null).length} workout(s) with heart-rate
+          data in this range — need at least 3 for a trend. (A heart-rate monitor must have
+          been paired during the workout.)
         </p>
       )}
 
@@ -246,19 +256,37 @@ function FitnessPanel({ current, discipline }) {
           <div className={s.stats}>
             <Stat label="rides" value={analysis.rides.length} />
             <Stat label="span" value={analysis.spanDays} unit="days" />
-            <Stat
-              label="EF trend"
-              value={`${analysis.slopePerMonth >= 0 ? '+' : ''}${analysis.slopePerMonth.toFixed(1)}%`}
-              unit={`/month · ${fmtP(analysis.efP)}`}
-            />
-            <Stat
-              label="EF total"
-              value={`${analysis.efTotalPct >= 0 ? '+' : ''}${analysis.efTotalPct.toFixed(1)}%`}
-            />
-            <Stat
-              label="EF fit start → end"
-              value={`${analysis.fitStart.toFixed(3)} → ${analysis.fitEnd.toFixed(3)}`}
-            />
+            {analysis.efSeries && (
+              <>
+                <Stat
+                  label="EF trend"
+                  value={`${analysis.slopePerMonth >= 0 ? '+' : ''}${analysis.slopePerMonth.toFixed(1)}%`}
+                  unit={`/month · ${fmtP(analysis.efP)}`}
+                />
+                <Stat
+                  label="EF total"
+                  value={`${analysis.efTotalPct >= 0 ? '+' : ''}${analysis.efTotalPct.toFixed(1)}%`}
+                />
+                <Stat
+                  label="EF fit start → end"
+                  value={`${analysis.fitStart.toFixed(3)} → ${analysis.fitEnd.toFixed(3)}`}
+                />
+              </>
+            )}
+            {analysis.intensitySeries && (
+              <Stat
+                label="intensity fit (%HRmax)"
+                value={`${analysis.intensityFitStart.toFixed(0)}% → ${analysis.intensityFitEnd.toFixed(0)}%`}
+                unit={fmtP(analysis.intensityP)}
+              />
+            )}
+            {analysis.zoneTotals.some(v => v > 0) && analysis.zoneTotals.map((secs, i) => (
+              <Stat
+                key={i}
+                label={`zone ${i + 1} total`}
+                value={secs > 0 ? fmtZone(Math.round(secs)) : null}
+              />
+            ))}
             <Stat
               label="distance traveled"
               value={analysis.totalDistance ? analysis.totalDistance.toFixed(1) : null}
@@ -302,11 +330,29 @@ function FitnessPanel({ current, discipline }) {
             )}
           </div>
           <div className={s.charts}>
-            <LineChart
-              title="Efficiency Factor" unit={`W/BPM · thick line = trend fit · ${fmtP(analysis.efP)}`}
-              seriesList={analysis.efSeries} color="#c6fe28"
-              xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
-            />
+            {analysis.efSeries && (
+              <LineChart
+                title={analysis.workloadKey === 'speed' ? 'Efficiency (speed per heartbeat)' : 'Efficiency Factor'}
+                unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'}/BPM · thick line = trend fit · ${fmtP(analysis.efP)}`}
+                seriesList={analysis.efSeries} color="#c6fe28"
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+              />
+            )}
+            {analysis.intensitySeries && (
+              <LineChart
+                title="Intensity" unit={`%HRMAX · avg HR relative to your HRmax · ${fmtP(analysis.intensityP)}`}
+                seriesList={analysis.intensitySeries} color="#b48aff"
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+              />
+            )}
+            {analysis.trimpSeries && (
+              <LineChart
+                title="Training Load (Edwards TRIMP)"
+                unit={`ZONE-WEIGHTED MINUTES · ${fmtP(analysis.trimpP)}`}
+                seriesList={analysis.trimpSeries} color="#e07b39"
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+              />
+            )}
             {analysis.vo2Series && (
               <LineChart
                 title={analysis.vo2InMlKg ? 'Estimated VO₂max' : 'Estimated Max Aerobic Power'}
@@ -326,7 +372,8 @@ function FitnessPanel({ current, discipline }) {
             )}
             {analysis.outputSeries && (
               <LineChart
-                title="Avg Output (steady-state)" unit={`W · thick line = trend fit · ${fmtP(analysis.outputP)}`}
+                title={analysis.workloadKey === 'speed' ? 'Avg Speed (steady-state)' : 'Avg Output (steady-state)'}
+                unit={`${analysis.workloadKey === 'speed' ? 'MPH' : 'W'} · thick line = trend fit · ${fmtP(analysis.outputP)}`}
                 seriesList={analysis.outputSeries} color="#4da3ff"
                 xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
               />

@@ -683,12 +683,21 @@ const server = http.createServer((req, res) => {
         .sort((a, b) => String(a.start).localeCompare(String(b.start)));
       const byId = new Map(workouts.map(w => [String(w.id), w]));
 
+      // Workload signal, in preference order: power, speed, then pace
+      // (outdoor walks record pace only; inverted to speed below so higher
+      // is always better). With none, the analysis degrades to HR-only
+      // intensity metrics.
+      const countWith = key => workouts.filter(w => w[`avg_${key}`] != null).length;
+      const wKey = countWith('output') >= 3 ? 'output'
+        : countWith('speed') >= 3 ? 'speed'
+        : countWith('pace') >= 3 ? 'pace' : null;
+
       // Single pass over metrics.csv with plain accumulators — the file is
       // hundreds of thousands of rows, so no per-row object churn.
       const lines = fs.readFileSync(path.join(base, 'metrics.csv'), 'utf8').split('\n');
       const header = (lines[0] || '').split(',');
       const iId = header.indexOf('workoutId'), iSec = header.indexOf('second');
-      const iOut = header.indexOf('output'), iHr = header.indexOf('heart_rate');
+      const iW = wKey ? header.indexOf(wKey) : -1, iHr = header.indexOf('heart_rate');
       const acc = new Map();
       for (let i = 1; i < lines.length; i++) {
         const parts = lines[i].split(',');
@@ -699,24 +708,29 @@ const server = http.createServer((req, res) => {
         let a = acc.get(parts[iId]);
         if (!a) {
           acc.set(parts[iId], a = {
-            outSum: 0, outN: 0, maxHr: 0, h: [[0, 0, 0], [0, 0, 0]], mins: [],
+            wSum: 0, wN: 0, hrSum: 0, hrN: 0, maxHr: 0,
+            h: [[0, 0, 0], [0, 0, 0]], mins: [],
           });
         }
-        const out = parts[iOut] === '' || parts[iOut] == null ? null : +parts[iOut];
+        let wl = iW < 0 || parts[iW] === '' || parts[iW] == null ? null : +parts[iW];
+        // Pace is min/mi (lower = faster): invert to mph so the workload
+        // scale runs the same direction as power and speed.
+        if (wKey === 'pace') wl = wl > 0 ? 60 / wl : null;
         const hr = parts[iHr] === '' || parts[iHr] == null ? 0 : +parts[iHr];
-        if (out != null) { a.outSum += out; a.outN++; }
+        if (wl != null) { a.wSum += wl; a.wN++; }
+        if (hr > 0) { a.hrSum += hr; a.hrN++; }
         if (hr > a.maxHr) a.maxHr = hr;
-        if (out != null && hr > 0) {
+        if (wl != null && hr > 0) {
           const mid = WARMUP + ((w.duration_secs || 1200) - WARMUP) / 2;
           const half = a.h[sec <= mid ? 0 : 1];
-          half[0] += out; half[1] += hr; half[2]++;
+          half[0] += wl; half[1] += hr; half[2]++;
           // Minute bins for the VO2 proxy regression. HR lags power by
           // ~30-60s, so per-second pairs flatten the slope and wildly
           // over-extrapolate; minute means plus a 30s HR shift (HR is
           // credited to the minute of the power that caused it) absorb it.
           const mw = Math.floor(sec / 60);
           const wBin = a.mins[mw] || (a.mins[mw] = [0, 0, 0, 0]);
-          wBin[0] += out; wBin[1]++;
+          wBin[0] += wl; wBin[1]++;
           const mh = Math.floor((sec - 30) / 60);
           if (mh >= 0) {
             const hBin = a.mins[mh] || (a.mins[mh] = [0, 0, 0, 0]);
@@ -729,11 +743,19 @@ const server = http.createServer((req, res) => {
         const a = acc.get(String(w.id));
         const [h1, h2] = a?.h || [[0, 0, 0], [0, 0, 0]];
         const pairs = h1[2] + h2[2];
+        // Zone durations came from effort_zones at backup time; Edwards
+        // TRIMP = Σ minutes-in-zone × zone number, the standard HR-only
+        // training-load measure.
+        const zones = [1, 2, 3, 4, 5].map(z => w[`hr_z${z}_secs`] || 0);
+        const zoneTotal = zones.reduce((sum, v) => sum + v, 0);
         const ride = {
           id: w.id, start: w.start, title: w.title,
-          avgOutput: a?.outN ? a.outSum / a.outN : null,
-          avgHr: pairs ? (h1[1] + h2[1]) / pairs : null,
+          avgOutput: a?.wN ? a.wSum / a.wN : null,
+          avgHr: a?.hrN ? a.hrSum / a.hrN : null,
           maxHr: a?.maxHr || null,
+          pctHrMax: a?.hrN && hrMax ? (a.hrSum / a.hrN / hrMax) * 100 : null,
+          trimp: zoneTotal ? zones.reduce((sum, secs, i) => sum + (secs / 60) * (i + 1), 0) : null,
+          zones: zoneTotal ? zones : null,
           ef: null, decoupling: null,
           totalOutput: w.total_output ?? w.total_total_output ?? null,
           distance: w.distance ?? w.total_distance ?? null,
@@ -758,7 +780,8 @@ const server = http.createServer((req, res) => {
           const bins = (a.mins || [])
             .filter(bin => bin && bin[1] >= 30 && bin[3] >= 30)
             .map(bin => ({ w: bin[0] / bin[1], hr: bin[2] / bin[3] }));
-          if (hrMax && bins.length >= 8) {
+          // The extrapolation and ACSM conversion are power equations only.
+          if (wKey === 'output' && hrMax && bins.length >= 8) {
             const ws = bins.map(bin => bin.w);
             const n = bins.length;
             const sW = ws.reduce((sum, v) => sum + v, 0);
@@ -789,7 +812,12 @@ const server = http.createServer((req, res) => {
         }
         return ride;
       });
-      return json(res, 200, { ok: true, data: { rides, hrMax } });
+      // Pace is served as speed after inversion, so the client only ever
+      // sees two workload flavors.
+      return json(res, 200, {
+        ok: true,
+        data: { rides, hrMax, workloadKey: wKey === 'pace' ? 'speed' : wKey },
+      });
     } catch (e) {
       return json(res, 500, { ok: false, error: e.message });
     }
