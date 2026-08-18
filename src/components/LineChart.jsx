@@ -241,7 +241,7 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
           return (
             <g key={`band${i}`}>
               <rect x={PAD.l} width={w - PAD.l - PAD.r} y={y(hi)} height={y(lo) - y(hi)}
-                fill={b.color} fillOpacity="0.13" />
+                fill={b.color} fillOpacity="0.3" />
               <text className={s.axisLabel} x={w - PAD.r - 4} y={y(hi) + 10}
                 textAnchor="end" style={{ fill: b.color }}>{b.label}</text>
             </g>
