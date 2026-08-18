@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness } from '../api.js';
+import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness, getProfile } from '../api.js';
 import LineChart from '../components/LineChart.jsx';
 import { MuscleHighlight } from '../components/MuscleBody.jsx';
 import Splom from '../components/Splom.jsx';
@@ -59,6 +59,25 @@ const DAY = 86_400_000;
 // Z3 75-85%, Z4 85-95%, Z5 95%+.
 const ZONE_EDGES = [0, 0.65, 0.75, 0.85, 0.95, 1.06];
 
+// VO2max fitness-tier boundaries (ml/kg/min) by sex and age decade —
+// approximate Apple Health style cardio-fitness levels: [low-top,
+// below-avg-top, above-avg-top]; High is everything above.
+const VO2_TIERS = {
+  m: { 20: [34, 41, 52], 30: [33, 39, 52], 40: [32, 38, 50], 50: [28, 35, 47], 60: [24, 30, 42] },
+  f: { 20: [27, 33, 42], 30: [26, 32, 41], 40: [24, 30, 40], 50: [21, 26, 36], 60: [18, 23, 32] },
+};
+const vo2BandsFor = (age, sex) => {
+  const bracket = Math.min(60, Math.max(20, Math.floor((Number(age) || 0) / 10) * 10));
+  const edges = VO2_TIERS[sex]?.[bracket];
+  if (!age || !edges) return null;
+  return [
+    { from: 0, to: edges[0], color: '#eb3745', label: 'LOW' },
+    { from: edges[0], to: edges[1], color: '#f78e1e', label: 'BELOW AVG' },
+    { from: edges[1], to: edges[2], color: '#f6c344', label: 'ABOVE AVG' },
+    { from: edges[2], to: edges[2] * 1.4, color: '#7ec642', label: 'HIGH' },
+  ];
+};
+
 // Custom analysis sets: named cross-discipline filters. Trainer sessions
 // were logged inconsistently as strength or stretching; the duration
 // histogram shows the cluster runs 42-66 minutes with a clean gap below.
@@ -85,6 +104,18 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [weight, setWeight] = useState(() => localStorage.getItem('peloWeightLbs') || '');
+  const [age, setAge] = useState(() => localStorage.getItem('peloAge') || '');
+  const [sex, setSex] = useState(() => localStorage.getItem('peloSex') || 'm');
+
+  // manual/profile.json is the source of truth for these; inputs remain
+  // as session overrides.
+  useEffect(() => {
+    getProfile().then(p => {
+      if (p.weightLbs != null) setWeight(String(p.weightLbs));
+      if (p.age != null) setAge(String(p.age));
+      if (p.sex) setSex(p.sex);
+    }).catch(() => {});
+  }, []);
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
@@ -236,6 +267,20 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
           placeholder="weight lbs" title="Body weight, used only for the VO₂max estimate"
           value={weight} onChange={e => setWeight(e.target.value)}
         />
+        <input
+          className={`${s.fitInput} ${s.fitAge}`} type="number" min="18" max="90"
+          placeholder="age" title="Age, used only for the VO₂max target bands"
+          value={age}
+          onChange={e => { setAge(e.target.value); localStorage.setItem('peloAge', e.target.value); }}
+        />
+        <select
+          className={s.fitInput} value={sex}
+          title="Sex, used only for the VO₂max target bands"
+          onChange={e => { setSex(e.target.value); localStorage.setItem('peloSex', e.target.value); }}
+        >
+          <option value="m">M</option>
+          <option value="f">F</option>
+        </select>
         <button className={s.fitBtn} onClick={run} disabled={running}>
           {running ? 'Running…' : 'Run Analysis'}
         </button>
@@ -353,6 +398,7 @@ function FitnessPanel({ current, discipline, onOpenWorkout }) {
                 unit={(analysis.vo2InMlKg ? 'ML/KG/MIN' : 'W')
                   + ` · HR-vs-power extrapolated to personal HRmax · ${fmtP(analysis.vo2P)}`}
                 seriesList={analysis.vo2Series} color="#e0c341"
+                bands={analysis.vo2InMlKg ? vo2BandsFor(age, sex) : undefined}
                 xLabelLeft={analysis.xLeft} xLabel={analysis.xRight} onPointClick={p => onOpenWorkout(p.id)} tipT={analysis.tipT} hoverId={hoverId} onHover={onHoverPoint}
               />
             )}

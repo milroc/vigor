@@ -21,6 +21,7 @@ export const startBackup = () => post('/api/backup');
 export const getBackupStatus = () => get('/api/backup/status');
 export const startPelotonBackup = () => post('/api/backup/peloton');
 export const getPelotonBackupStatus = () => get('/api/backup/peloton/status');
+export const getProfile = () => get('/api/profile');
 export const getPelotonWorkouts = () => get('/api/peloton/workouts');
 export const getPelotonFitness = (dir, params) => {
   const q = new URLSearchParams({ dir });

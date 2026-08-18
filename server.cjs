@@ -614,6 +614,18 @@ const server = http.createServer((req, res) => {
     return json(res, 200, { ok: true, data: pelotonState });
   }
 
+  // Hand-maintained profile (manual/profile.json): analysis parameters the
+  // APIs cannot provide — body weight, age, sex. Future: Apple Health.
+  if (req.method === 'GET' && pathname === '/api/profile') {
+    const file = path.join(__dirname, 'manual', 'profile.json');
+    if (!fs.existsSync(file)) return json(res, 200, { ok: true, data: {} });
+    try {
+      return json(res, 200, { ok: true, data: JSON.parse(fs.readFileSync(file, 'utf8')) });
+    } catch {
+      return json(res, 500, { ok: false, error: 'manual/profile.json is corrupt' });
+    }
+  }
+
   if (req.method === 'GET' && pathname === '/api/peloton/workouts') {
     try {
       const data = latestPelotonBackups().map(b => ({
