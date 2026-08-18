@@ -21,6 +21,12 @@ body {
   background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(198,254,40,0.06), transparent);
 }
 
+/* App shell: header + routed page as a column pinned to the viewport.
+   Pages that want a fit-to-viewport layout (no page scroll) take
+   flex: 1 + min-height: 0 + overflow hidden; ordinary pages simply
+   overflow the column and the body scrolls as before. */
+#root { display: flex; flex-direction: column; height: 100vh; }
+
 body::after {
   content: '';
   position: fixed; inset: 0;

@@ -118,7 +118,10 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
   // Bottom pane tab: the workout table or the correlation matrix.
   const [tab, setTab] = useState('table');
   // Chart-area height, adjustable by dragging the divider above the tabs.
-  const [chartsH, setChartsH] = useState(620);
+  // Starts proportional to the viewport so the bottom pane is visible on
+  // any desktop size.
+  const [chartsH, setChartsH] = useState(() =>
+    Math.max(260, Math.round((window.innerHeight || 900) * 0.34)));
   const onDividerDown = e => {
     e.preventDefault();
     const startY = e.clientY, startH = chartsH;
@@ -357,8 +360,11 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
       {analysis && (
         <>
           <div className={s.topGrid}>
+          {/* Topline: how much did I train, and am I getting fitter?
+              Everything else (per-metric fits, p-values) lives on the
+              ranked charts below. */}
           <div className={s.stats}>
-            <Stat label="rides" value={analysis.rides.length} />
+            <Stat label="workouts" value={analysis.rides.length} />
             <Stat label="span" value={analysis.spanDays} unit="days" />
             {analysis.efSeries && (
               <>
@@ -371,63 +377,35 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
                   label="EF total"
                   value={`${analysis.efTotalPct >= 0 ? '+' : ''}${analysis.efTotalPct.toFixed(1)}%`}
                 />
-                <Stat
-                  label="EF fit start → end"
-                  value={`${analysis.fitStart.toFixed(3)} → ${analysis.fitEnd.toFixed(3)}`}
-                />
               </>
             )}
-            {analysis.intensitySeries && (
+            {!analysis.efSeries && analysis.intensitySeries && (
               <Stat
                 label="intensity fit (%HRmax)"
                 value={`${analysis.intensityFitStart.toFixed(0)}% → ${analysis.intensityFitEnd.toFixed(0)}%`}
                 unit={fmtP(analysis.intensityP)}
               />
             )}
+            {analysis.vo2Series && analysis.vo2InMlKg && (
+              <Stat
+                label="est. VO₂max"
+                value={`${analysis.vo2FitStart.toFixed(1)} → ${analysis.vo2FitEnd.toFixed(1)}`}
+                unit="ml/kg/min"
+              />
+            )}
             <Stat
-              label="distance traveled"
+              label="distance"
               value={analysis.totalDistance ? analysis.totalDistance.toFixed(1) : null}
               unit="mi"
             />
             <Stat
-              label="median avg HR"
-              value={analysis.medianHr ? Math.round(analysis.medianHr) : null}
-              unit="bpm"
-            />
-            <Stat
-              label="total output"
-              value={analysis.totalOutput ? analysis.totalOutput.toLocaleString() : null}
-              unit="kJ"
-            />
-            <Stat
-              label="total calories"
+              label="calories"
               value={analysis.totalCalories ? analysis.totalCalories.toLocaleString() : null}
               unit="kcal"
             />
-            {analysis.vo2Series && (
-              <>
-                <Stat
-                  label={analysis.vo2InMlKg ? 'est. VO₂max fit' : 'est. max power fit'}
-                  value={`${analysis.vo2FitStart.toFixed(1)} → ${analysis.vo2FitEnd.toFixed(1)}`}
-                  unit={analysis.vo2InMlKg ? 'ml/kg/min' : 'W'}
-                />
-                <Stat
-                  label="VO₂ proxy trend"
-                  value={`${analysis.vo2SlopePerMonth >= 0 ? '+' : ''}${analysis.vo2SlopePerMonth.toFixed(1)}%`}
-                  unit={`/month · ${fmtP(analysis.vo2P)}`}
-                />
-              </>
-            )}
-            {analysis.hr100Series && (
-              <Stat
-                label="HR @ 100W fit (lower = fitter)"
-                value={`${analysis.hr100FitStart.toFixed(1)} → ${analysis.hr100FitEnd.toFixed(1)}`}
-                unit={`bpm · ${fmtP(analysis.hr100P)}`}
-              />
-            )}
           </div>
           <ZoneDays rides={analysis.rides} onOpenWorkout={onOpenWorkout}
-            hoverId={hoverId} onHover={onHoverPoint} />
+            hoverId={hoverId} onHover={onHoverPoint} fill />
           </div>
           <div className={s.chartsScroll} style={{ height: chartsH }}>
             <div className={s.chartGrid}>
@@ -454,6 +432,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
         </>
       )}
 
+      <div className={s.bottomPane}>
       <div className={s.chips}>
         <button
           className={s.chip + (tab === 'table' || !analysis ? ` ${s.chipActive}` : '')}
@@ -471,6 +450,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
         )}
       </div>
 
+      <div className={s.paneScroll}>
       {tab === 'splom' && analysis ? (
         <Splom
           data={analysis.rides}
@@ -486,7 +466,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
           ]}
         />
       ) : (
-        <div className={s.tableWrap}>
+        <>
           <table className={shared.table}>
             <thead>
               <tr>
@@ -517,8 +497,10 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
             </tbody>
           </table>
           {!workouts.length && <p className={s.intro}>No workouts match this filter.</p>}
-        </div>
+        </>
       )}
+      </div>
+      </div>
     </section>
   );
 }
@@ -668,21 +650,16 @@ export default function Peloton() {
             </div>
             <button className={shared.btn} onClick={() => select(null)}>Close</button>
           </div>
+          {/* Topline only — per-metric averages live on the charts below. */}
           <div className={s.stats}>
             <Stat label="strive score" value={selected.strive_score} />
             <Stat label="total output" value={summary(selected, 'total_output')} unit="kJ" />
             <Stat label="distance" value={summary(selected, 'distance')} unit="mi" />
             <Stat label="calories" value={summary(selected, 'calories')} unit="kcal" />
-            {METRICS.map(m => (
-              <Stat
-                key={m.key}
-                label={`avg ${m.title.toLowerCase()}`}
-                value={selected[`avg_${m.key}`]}
-                unit={m.unit}
-              />
-            ))}
+            <Stat label="avg heart rate" value={selected.avg_heart_rate} unit="BPM" />
           </div>
 
+          <div className={s.modalScroll}>
           {muscles.length > 0 && (
             <div className={s.muscleRow}>
               <MuscleHighlight
@@ -740,6 +717,8 @@ export default function Peloton() {
                 />
               );
             })()}
+          </div>
+          <div className={s.modalChartGrid}>
             {charts.filter(m => m.key !== 'heart_rate' || !hrMaxRef).map(m => (
               <LineChart
                 key={m.key}
@@ -753,6 +732,7 @@ export default function Peloton() {
                 tipT={t => fmtZone(Math.max(0, Math.round(t)))}
               />
             ))}
+          </div>
           </div>
         </section>
         </div>

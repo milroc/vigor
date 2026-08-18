@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import s from './ZoneDays.module.css';
 
 // Time in zone over time: one stacked bar per calendar day (Z1 bottom → Z5
@@ -12,8 +12,28 @@ export const ZONE_COLORS = ['#3b9ad9', '#7ec642', '#f6c344', '#f78e1e', '#eb3745
 const W = 640, H = 180, PAD = { l: 44, r: 10, t: 10, b: 20 };
 const DAY = 86_400_000;
 
-export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
+export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover, fill }) {
   const [choice, setChoice] = useState(null);
+  // Pixel-space sizing, same pattern as LineChart: the viewBox tracks the
+  // measured plot size so a flex parent can stretch the chart without
+  // distorting text.
+  const plotRef = useRef(null);
+  const [size, setSize] = useState({ w: W, h: H });
+  useEffect(() => {
+    const ro = new ResizeObserver(([e]) => {
+      const { width, height } = e.contentRect;
+      if (width && height) {
+        setSize(prev =>
+          Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1
+            ? prev : { w: width, h: height }
+        );
+      }
+    });
+    if (plotRef.current) ro.observe(plotRef.current);
+    return () => ro.disconnect();
+  }, []);
+  const { w, h } = size;
+
   const data = rides.filter(r => r.zones?.some(v => v > 0));
   if (data.length < 2) return null;
 
@@ -47,17 +67,17 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
 
   const t0 = Date.parse(days[0].day);
   const tMax = (Date.parse(days[days.length - 1].day) - t0) / DAY || 1;
-  const x = day => PAD.l + ((Date.parse(day) - t0) / DAY / tMax) * (W - PAD.l - PAD.r);
+  const x = day => PAD.l + ((Date.parse(day) - t0) / DAY / tMax) * (w - PAD.l - PAD.r);
   const maxTotal = Math.max(...days.map(d => d.total)) * 1.06 || 1;
-  const y = v => PAD.t + (1 - v / maxTotal) * (H - PAD.t - PAD.b);
+  const y = v => PAD.t + (1 - v / maxTotal) * (h - PAD.t - PAD.b);
   // One slot per calendar day on the axis; bars fill most of a slot.
-  const barW = Math.max(2, Math.min(10, ((W - PAD.l - PAD.r) / (tMax + 1)) * 0.8));
+  const barW = Math.max(2, Math.min(10, ((w - PAD.l - PAD.r) / (tMax + 1)) * 0.8));
   const grid = [0.25, 0.5, 0.75].map(f => (maxTotal / 1.06) * f);
 
   const nearestDay = e => {
     const svg = e.currentTarget.ownerSVGElement;
     const rect = svg.getBoundingClientRect();
-    const vx = (e.clientX - rect.left) * (W / rect.width);
+    const vx = (e.clientX - rect.left) * (w / rect.width);
     let best = null, bestD = Infinity;
     for (const d of days) {
       const dist = Math.abs(x(d.day) - vx);
@@ -73,7 +93,7 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
   };
 
   return (
-    <div className={s.wrap}>
+    <div className={s.wrap + (fill ? ` ${s.fill}` : '')}>
       <div className={s.name}>
         Time in Zone<span>MIN PER DAY · STACKED Z1→Z5 · SAME-DAY SESSIONS SUMMED · CLICK A DAY</span>
         <span className={s.legend}>
@@ -85,17 +105,18 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
           ))}
         </span>
       </div>
-      <svg className={s.svg} viewBox={`0 0 ${W} ${H}`}>
+      <div className={s.plot} ref={plotRef}>
+      <svg className={s.svg} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
         {grid.map((g, i) => (
           <g key={i}>
-            <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)}
+            <line x1={PAD.l} x2={w - PAD.r} y1={y(g)} y2={y(g)}
               stroke="#23231e" strokeDasharray="3,4" />
             <text className={s.axis} x={PAD.l - 6} y={y(g) + 3} textAnchor="end">
               {Math.round(g)}
             </text>
           </g>
         ))}
-        <line x1={PAD.l} x2={W - PAD.r} y1={y(0)} y2={y(0)} stroke="#23231e" />
+        <line x1={PAD.l} x2={w - PAD.r} y1={y(0)} y2={y(0)} stroke="#23231e" />
         {days.map(d => {
           const hovered = hoverId != null && d.sessions.some(sess => sess.id === hoverId);
           let acc = 0;
@@ -116,19 +137,20 @@ export default function ZoneDays({ rides, onOpenWorkout, hoverId, onHover }) {
             );
           });
         })}
-        <text className={s.axis} x={PAD.l} y={H - 4} textAnchor="start">{days[0].day}</text>
-        <text className={s.axis} x={W - PAD.r} y={H - 4} textAnchor="end">
+        <text className={s.axis} x={PAD.l} y={h - 4} textAnchor="start">{days[0].day}</text>
+        <text className={s.axis} x={w - PAD.r} y={h - 4} textAnchor="end">
           {days[days.length - 1].day}
         </text>
         {onOpenWorkout && (
           <rect
-            x={PAD.l} y={PAD.t} width={W - PAD.l - PAD.r} height={H - PAD.t - PAD.b}
+            x={PAD.l} y={PAD.t} width={w - PAD.l - PAD.r} height={h - PAD.t - PAD.b}
             fill="transparent" style={{ cursor: 'pointer' }} onClick={pickDay}
             onMouseMove={onHover ? e => onHover(nearestDay(e)?.sessions[0]?.id ?? null) : undefined}
             onMouseLeave={onHover ? () => onHover(null) : undefined}
           />
         )}
       </svg>
+      </div>
       {choice && (
         <div className={s.chooserBackdrop} onClick={() => setChoice(null)}>
           <div className={s.chooser} onClick={e => e.stopPropagation()}>
