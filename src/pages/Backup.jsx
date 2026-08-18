@@ -46,6 +46,9 @@ function useBackupJob(start, getStatus, onDone) {
       poll();
     } catch (e) {
       setError(e.message);
+      // A 409 means a backup is already running (other tab, double-click):
+      // poll anyway so the in-flight job is visible.
+      poll();
     }
   };
 

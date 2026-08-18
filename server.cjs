@@ -152,8 +152,8 @@ async function backupAll() {
 
 // ---- Peloton ---------------------------------------------------------------
 // Peloton has no official public API; this drives the same REST endpoints the
-// web app uses, authenticated by the session cookie /auth/login returns.
-// Credentials come from PELOTON_EMAIL / PELOTON_PASSWORD in .env (gitignored).
+// web app uses. Credentials come from PELOTON_LOGIN / PELOTON_PASSWORD env
+// vars (av inject) or the gitignored .env fallback.
 const PELO_API = 'https://api.onepeloton.com';
 
 (function loadEnvFile() {
@@ -161,7 +161,10 @@ const PELO_API = 'https://api.onepeloton.com';
   if (!fs.existsSync(file)) return;
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
     const m = line.match(/^\s*(\w+)\s*=\s*(.*?)\s*$/);
-    if (m && m[2] && !(m[1] in process.env)) process.env[m[1]] = m[2];
+    if (!m || !m[2] || m[1] in process.env) continue;
+    let v = m[2];
+    if (/^".*"$/.test(v) || /^'.*'$/.test(v)) v = v.slice(1, -1);
+    process.env[m[1]] = v;
   }
 })();
 
@@ -214,7 +217,8 @@ async function peloOAuthLogin(login, password) {
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
         url = new URL(res.headers.get('location'), url).href;
         hops.push(url);
-        opts = { method: 'GET' };
+        // 307/308 must preserve method and body; other 3xx downgrade to GET.
+        if (res.status !== 307 && res.status !== 308) opts = { method: 'GET' };
         continue;
       }
       return { res, finalUrl: url, hops };
@@ -265,6 +269,7 @@ async function peloOAuthLogin(login, password) {
     const action = html.match(/<form[^>]*action="([^"]*)"/i)?.[1];
     if (!action) throw new Error('peloton login flow changed: no redirect and no callback form');
     const decode = s => s.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(d))
+      .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
       .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     const fields = new URLSearchParams();
     for (const inp of html.matchAll(/<input[^>]+type="hidden"[^>]*>/gi)) {
@@ -484,7 +489,9 @@ function fromCsv(text) {
   const [header, ...data] = rows;
   return data.map(r => Object.fromEntries(header.map((name, i) => {
     let v = r[i] ?? '';
-    if (v !== '' && /^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
+    // ID columns stay strings: a 32-char hex Peloton id that happens to be
+    // all digits would otherwise be mangled into float notation.
+    if (v !== '' && !/id$/i.test(name) && /^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
     return [name, v === '' ? null : v];
   })));
 }
@@ -622,7 +629,8 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname === '/api/peloton/metrics') {
     const q = new URL(req.url, 'http://localhost').searchParams;
     const dir = q.get('dir') || '', workout = q.get('workout') || '';
-    if (!/^[\w.-]+$/.test(dir) || !/^[\w-]+$/.test(workout)) {
+    // /^\.+$/ blocks '.', '..' — the character class alone admits them.
+    if (!/^[\w.-]+$/.test(dir) || /^\.+$/.test(dir) || !/^[\w-]+$/.test(workout)) {
       return json(res, 400, { ok: false, error: 'bad dir or workout param' });
     }
     const file = path.join(__dirname, 'backups', dir, 'metrics.csv');
@@ -647,7 +655,9 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname === '/api/peloton/fitness') {
     const q = new URL(req.url, 'http://localhost').searchParams;
     const dir = q.get('dir') || '';
-    if (!/^[\w.-]+$/.test(dir)) return json(res, 400, { ok: false, error: 'bad dir param' });
+    if (!/^[\w.-]+$/.test(dir) || /^\.+$/.test(dir)) {
+      return json(res, 400, { ok: false, error: 'bad dir param' });
+    }
     const base = path.join(__dirname, 'backups', dir);
     if (!fs.existsSync(path.join(base, 'workouts.csv'))) {
       return json(res, 404, { ok: false, error: 'no such backup' });
@@ -658,8 +668,12 @@ const server = http.createServer((req, res) => {
       const weightKg = q.get('weightLbs') ? Number(q.get('weightLbs')) * 0.45359 : null;
       const WARMUP = 120;
       const all = fromCsv(fs.readFileSync(path.join(base, 'workouts.csv'), 'utf8'));
-      // Personal HRmax proxy: highest HR ever recorded across the whole backup.
-      const hrMax = Math.max(0, ...all.map(w => w.max_heart_rate || 0)) || null;
+      // Personal HRmax proxy: 3rd-highest per-workout max within the requested
+      // discipline — a single strap spike would permanently inflate a plain
+      // max, and HRmax differs across modalities.
+      const hrPool = (discipline ? all.filter(w => w.discipline === discipline) : all)
+        .map(w => w.max_heart_rate).filter(v => v > 0).sort((a, b) => b - a);
+      const hrMax = hrPool.length ? hrPool[Math.min(2, hrPool.length - 1)] : null;
       const workouts = all
         .filter(w => w.status === 'COMPLETE'
           && (!discipline || w.discipline === discipline)
@@ -729,7 +743,9 @@ const server = http.createServer((req, res) => {
         // EF over sums == meanOutput/meanHr; require ~5min of paired samples.
         if (pairs >= 300) {
           ride.ef = (h1[0] + h2[0]) / (h1[1] + h2[1]);
-          if (h1[2] > 30 && h2[2] > 30) {
+          // ≥2min of paired samples per half; a sliver of HR in one half
+          // makes the ratio meaningless.
+          if (h1[2] >= 120 && h2[2] >= 120) {
             const ef1 = h1[0] / h1[1], ef2 = h2[0] / h2[1];
             ride.decoupling = ((ef1 - ef2) / ef1) * 100;
           }
@@ -755,10 +771,13 @@ const server = http.createServer((req, res) => {
               const slope = (n * sWH - sW * sH) / den;
               const intercept = (sH - slope * sW) / n;
               if (slope >= 0.1) {
-                // Interpolated, not extrapolated: 100W sits inside the
-                // ridden power band, so this is the fitted HR at a fixed
-                // reference workload — falling over time = fitter.
-                ride.hrAt100 = intercept + slope * 100;
+                // Fitted HR at a fixed reference workload — falling over
+                // time = fitter. Only emitted when 100W actually sits
+                // inside the ridden power band (interpolation, never
+                // extrapolation).
+                if (Math.min(...ws) <= 100 && Math.max(...ws) >= 100) {
+                  ride.hrAt100 = intercept + slope * 100;
+                }
                 const wMax = (hrMax - intercept) / slope;
                 if (wMax > 100 && wMax < 500) {
                   ride.wAtHrMax = wMax;

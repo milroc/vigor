@@ -14,7 +14,8 @@ export default function Splom({ data, fields, color = '#c6fe28' }) {
     const out = {};
     for (const f of fields) {
       const vals = data.map(d => d[f.key]).filter(v => v != null);
-      let min = Math.min(...vals), max = Math.max(...vals);
+      let min = vals.length ? Math.min(...vals) : 0;
+      let max = vals.length ? Math.max(...vals) : 1;
       const pad = (max - min || 1) * 0.06;
       min -= pad; max += pad;
       out[f.key] = { min, max };

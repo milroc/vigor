@@ -42,12 +42,18 @@ function fromCsv(text) {
   const [header, ...data] = rows;
   return data.map(r => Object.fromEntries(header.map((name, i) => {
     let v = r[i] ?? '';
-    if (v !== '' && /^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
+    // ID columns stay strings: an all-digit hex Peloton id must not be
+    // mangled into float notation.
+    if (v !== '' && !/id$/i.test(name) && /^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
     return [name, v === '' ? null : v];
   })));
 }
 
 // Newest peloton backup dir (optionally for a specific user).
+if (!fs.existsSync(root)) {
+  console.error('no backups/ directory — run a backup from the Backup tab first');
+  process.exit(1);
+}
 const dirs = fs.readdirSync(root)
   .filter(n => n.includes('-peloton-') && (!USER || n.endsWith(`-${USER}`)))
   .filter(n => fs.existsSync(path.join(root, n, 'workouts.csv')))
@@ -88,11 +94,14 @@ for (const w of workouts) {
   };
   if (paired.length >= 300) {
     ride.ef = mean(paired.map(r => r.output)) / ride.avgHr;
-    const mid = paired[Math.floor(paired.length / 2)].second;
-    const half = rowsHalf => mean(rowsHalf.map(r => r.output)) / mean(rowsHalf.map(r => r.heart_rate));
-    const ef1 = half(paired.filter(r => r.second <= mid));
-    const ef2 = half(paired.filter(r => r.second > mid));
-    ride.decoupling = ((ef1 - ef2) / ef1) * 100;
+    // Time-midpoint split (standard Pw:HR convention), matching server.cjs.
+    const mid = WARMUP_SECS + ((w.duration_secs || 1200) - WARMUP_SECS) / 2;
+    const h1 = paired.filter(r => r.second <= mid), h2 = paired.filter(r => r.second > mid);
+    if (h1.length >= 120 && h2.length >= 120) {
+      const half = rowsHalf => mean(rowsHalf.map(r => r.output)) / mean(rowsHalf.map(r => r.heart_rate));
+      const ef1 = half(h1), ef2 = half(h2);
+      ride.decoupling = ((ef1 - ef2) / ef1) * 100;
+    }
   }
   rides.push(ride);
 }

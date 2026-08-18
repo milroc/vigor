@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness } from '../api.js';
 import LineChart from '../components/LineChart.jsx';
 import { MuscleHighlight } from '../components/MuscleBody.jsx';
@@ -169,7 +169,9 @@ function FitnessPanel({ current, discipline }) {
           { samples: pts, dots: true, opacity: 0.75 },
           { samples: [{ t: 0, v: fit(0) }, { t: tMax, v: fit(tMax) }], width: 2.5 },
         ],
-        slopePerMonth: (slope * 30.44 / my) * 100,
+        // Percent per month against the fitted start value, so monthly and
+        // total percentages share a base.
+        slopePerMonth: (slope * 30.44 / fit(0)) * 100,
         fitStart: fit(0), fitEnd: fit(tMax),
         p,
       };
@@ -201,7 +203,9 @@ function FitnessPanel({ current, discipline }) {
       totalDistance: sum('distance'),
       totalOutput: sum('totalOutput'),
       totalCalories: sum('calories'),
-      medianHr: hrs.length ? hrs[Math.floor(hrs.length / 2)] : null,
+      medianHr: !hrs.length ? null
+        : hrs.length % 2 ? hrs[(hrs.length - 1) / 2]
+        : (hrs[hrs.length / 2 - 1] + hrs[hrs.length / 2]) / 2,
       spanDays: Math.round(tMax),
       xLeft: rides[0].start.slice(0, 10),
       xRight: rides[rides.length - 1].start.slice(0, 10),
@@ -320,22 +324,33 @@ function FitnessPanel({ current, discipline }) {
                 xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
               />
             )}
-            <LineChart
-              title="Avg Output (steady-state)" unit={`W · thick line = trend fit · ${fmtP(analysis.outputP)}`}
-              seriesList={analysis.outputSeries} color="#4da3ff"
-              xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
-            />
-            <LineChart
-              title="Avg Heart Rate (steady-state)" unit={`BPM · thick line = trend fit · ${fmtP(analysis.hrP)}`}
-              seriesList={analysis.hrSeries} color="#ff6b9d"
-              xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
-            />
-            <LineChart
-              title="Distance" unit={`MI · thick line = trend fit · ${fmtP(analysis.distanceP)}`}
-              seriesList={analysis.distanceSeries} color="#3fd8c7"
-              xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
-            />
+            {analysis.outputSeries && (
+              <LineChart
+                title="Avg Output (steady-state)" unit={`W · thick line = trend fit · ${fmtP(analysis.outputP)}`}
+                seriesList={analysis.outputSeries} color="#4da3ff"
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+              />
+            )}
+            {analysis.hrSeries && (
+              <LineChart
+                title="Avg Heart Rate (steady-state)" unit={`BPM · thick line = trend fit · ${fmtP(analysis.hrP)}`}
+                seriesList={analysis.hrSeries} color="#ff6b9d"
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+              />
+            )}
+            {analysis.distanceSeries && (
+              <LineChart
+                title="Distance" unit={`MI · thick line = trend fit · ${fmtP(analysis.distanceP)}`}
+                seriesList={analysis.distanceSeries} color="#3fd8c7"
+                xLabelLeft={analysis.xLeft} xLabel={analysis.xRight}
+              />
+            )}
           </div>
+          <p className={s.intro}>
+            p-values are two-tailed OLS slope tests and assume independent rides;
+            back-to-back rides share day effects (heat, hydration, fatigue), so
+            treat them as approximate.
+          </p>
           <h2 className={shared.title}>Metric Correlations <span>· scatterplot matrix</span></h2>
           <Splom
             data={analysis.rides}
@@ -362,6 +377,7 @@ export default function Peloton() {
   const [selected, setSelected] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  const selectedIdRef = useRef(null);
 
   useEffect(() => {
     getPelotonWorkouts().then(setUsers).catch(e => setError(e.message));
@@ -384,12 +400,16 @@ export default function Peloton() {
   const select = w => {
     setSelected(w);
     setMetrics(null);
+    selectedIdRef.current = w?.id ?? null;
     if (!w) return;
     setMetricsLoading(true);
+    // Ignore responses for a workout the user has already clicked away from.
     getPelotonMetrics(current.dir, w.id)
-      .then(setMetrics)
-      .catch(() => setMetrics([]))
-      .finally(() => setMetricsLoading(false));
+      .then(data => { if (selectedIdRef.current === w.id) setMetrics(data); })
+      .catch(() => {
+        if (selectedIdRef.current === w.id) setMetrics({ metrics: [], muscles: [], error: true });
+      })
+      .finally(() => { if (selectedIdRef.current === w.id) setMetricsLoading(false); });
   };
 
   const switchUser = i => {
@@ -530,7 +550,11 @@ export default function Peloton() {
           )}
           {metricsLoading && <p className={s.intro}>loading per-second metrics…</p>}
           {!metricsLoading && metrics && !charts.length && (
-            <p className={s.intro}>No per-second metrics recorded for this workout.</p>
+            <p className={s.intro}>
+              {metrics.error
+                ? 'Could not load metrics for this workout — check the server log.'
+                : 'No per-second metrics recorded for this workout.'}
+            </p>
           )}
           <div className={s.charts}>
             {charts.map(m => (
