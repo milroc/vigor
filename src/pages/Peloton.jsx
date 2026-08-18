@@ -247,7 +247,6 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout }) {
 
   return (
     <section className={s.fitness}>
-      <h2 className={shared.title}>Cardio Fitness <span>· raw per-ride, no smoothing</span></h2>
       <div className={s.fitControls}>
         <select className={s.fitInput} value={selection} onChange={e => setSelection(e.target.value)}>
           <option value="">all workouts · {options.total}</option>
