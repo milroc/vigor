@@ -684,6 +684,8 @@ const server = http.createServer((req, res) => {
       const from = q.get('from'), to = q.get('to');
       const weightKg = q.get('weightLbs') ? Number(q.get('weightLbs')) * 0.45359 : null;
       const WARMUP = 120;
+      // Below any living resting HR — strap dropout noise, treated as missing.
+      const HR_FLOOR = 30;
       const all = fromCsv(fs.readFileSync(path.join(base, 'workouts.csv'), 'utf8'));
       const inDiscipline = w =>
         (disciplines.length ? disciplines.includes(w.discipline) : !discipline || w.discipline === discipline);
@@ -790,7 +792,8 @@ const server = http.createServer((req, res) => {
         // Pace is min/mi (lower = faster): invert to mph so the workload
         // scale runs the same direction as power and speed.
         if (wKey === 'pace') wl = wl > 0 ? 60 / wl : null;
-        const hr = parts[iHr] === '' || parts[iHr] == null ? 0 : +parts[iHr];
+        const hrRaw = parts[iHr] === '' || parts[iHr] == null ? 0 : +parts[iHr];
+        const hr = hrRaw >= HR_FLOOR ? hrRaw : 0;
         if (wl != null) { a.wSum += wl; a.wN++; }
         if (hr > 0) { a.hrSum += hr; a.hrN++; }
         if (hr > a.maxHr) a.maxHr = hr;

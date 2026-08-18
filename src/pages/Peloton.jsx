@@ -55,6 +55,9 @@ function Stat({ label, value, unit }) {
 
 const DAY = 86_400_000;
 
+// Below any living resting HR — strap dropout noise, treated as missing.
+const HR_FLOOR = 30;
+
 // Peloton's zone boundaries as fractions of max HR: Z1 <65%, Z2 65-75%,
 // Z3 75-85%, Z4 85-95%, Z5 95%+.
 const ZONE_EDGES = [0, 0.65, 0.75, 0.85, 0.95, 1.06];
@@ -601,16 +604,20 @@ export default function Peloton() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
+  // Missing seconds stay in the series as nulls so LineChart draws gaps
+  // instead of bridging them; sub-floor HR readings count as missing too.
   const charts = useMemo(() => {
     if (!metrics?.metrics?.length) return [];
     return METRICS
       .map(m => ({
         ...m,
-        samples: metrics.metrics
-          .filter(r => r[m.key] != null)
-          .map(r => ({ t: r.second, v: r[m.key] })),
+        samples: metrics.metrics.map(r => {
+          let v = r[m.key] ?? null;
+          if (m.key === 'heart_rate' && v != null && v < HR_FLOOR) v = null;
+          return { t: r.second, v };
+        }),
       }))
-      .filter(m => m.samples.length > 1);
+      .filter(m => m.samples.filter(p => p.v != null).length > 1);
   }, [metrics]);
 
   const muscles = useMemo(

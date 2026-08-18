@@ -12,6 +12,7 @@ function hexBins(points, x, y, r) {
   const colW = r * Math.sqrt(3), rowH = r * 1.5;
   const bins = new Map();
   for (const p of points) {
+    if (p.v == null) continue;
     const py = y(p.v), row = Math.round(py / rowH);
     const off = row % 2 ? colW / 2 : 0;
     const col = Math.round((x(p.t) - off) / colW);
@@ -87,25 +88,48 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
 
   const bandPts = targetBand ? [...targetBand.lower, ...targetBand.upper] : [];
   const all = seriesList.flatMap(x => x.samples).concat(hexPoints || []).concat(bandPts);
+  // null values are gaps: they hold their spot on the time axis but
+  // contribute nothing to the value scale and break the line.
+  const vals = all.filter(p => p.v != null);
   const tMin = Math.min(...all.map(p => p.t), 0);
   const tMax = Math.max(...all.map(p => p.t));
-  let vMin = Math.min(...all.map(p => p.v));
-  let vMax = Math.max(...all.map(p => p.v));
+  let vMin = Math.min(...vals.map(p => p.v));
+  let vMax = Math.max(...vals.map(p => p.v));
   if (zeroLine) { vMin = Math.min(vMin, 0); vMax = Math.max(vMax, 0); }
   const span = vMax - vMin || 1;
   vMin -= span * 0.08; vMax += span * 0.08;
 
   const x = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * (w - PAD.l - PAD.r);
   const y = v => PAD.t + (1 - (v - vMin) / (vMax - vMin)) * (h - PAD.t - PAD.b);
-  const pathOf = samples => samples.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+  const pathOf = samples => {
+    let d = '', pen = false;
+    for (const p of samples) {
+      if (p.v == null) { pen = false; continue; }
+      d += `${pen ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
+      pen = true;
+    }
+    return d;
+  };
 
   const gridY = [vMin + (vMax - vMin) * 0.25, vMin + (vMax - vMin) * 0.5, vMin + (vMax - vMin) * 0.75];
   const gid = `g-${title.replace(/\W/g, '')}`;
   const fmt = v => Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(Math.abs(v) < 3 ? 2 : 1);
   const first = seriesList[0];
-  const areaPath = fillFirst && first?.samples.length
-    ? `${pathOf(first.samples)}L${x(first.samples[first.samples.length - 1].t).toFixed(1)},${y(zeroLine ? 0 : vMin).toFixed(1)}L${x(first.samples[0].t).toFixed(1)},${y(zeroLine ? 0 : vMin).toFixed(1)}Z`
-    : null;
+  let areaPath = null;
+  if (fillFirst && first?.samples.length) {
+    // One closed polygon per contiguous run so gaps stay unfilled.
+    const segs = [];
+    let cur = [];
+    for (const p of first.samples) {
+      if (p.v == null) { if (cur.length > 1) segs.push(cur); cur = []; }
+      else cur.push(p);
+    }
+    if (cur.length > 1) segs.push(cur);
+    const baseY = y(zeroLine ? 0 : vMin).toFixed(1);
+    areaPath = segs.map(seg =>
+      `${pathOf(seg)}L${x(seg[seg.length - 1].t).toFixed(1)},${baseY}L${x(seg[0].t).toFixed(1)},${baseY}Z`
+    ).join('') || null;
+  }
 
   // The hex layer is thousands of <path> elements over tens of thousands of
   // points — memoized so re-renders (selection, resize ticks) don't pay for
@@ -202,7 +226,12 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
   }
   const scrub = scrubT == null || !tipSeries.length ? null : {
     px: x(scrubT),
-    vals: tipSeries.map(ser => ({ label: ser.label, color: ser.color ?? color, v: interpT(ser.samples, scrubT) })),
+    vals: tipSeries.map(ser => {
+      const pts = ser.samples.filter(p => p.v != null);
+      return pts.length
+        ? { label: ser.label, color: ser.color ?? color, v: interpT(pts, scrubT) }
+        : null;
+    }).filter(Boolean),
   };
 
   // Click targets for scatter points: a voronoi cell per dot, so any click
@@ -220,7 +249,7 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dotSeries, w, h, tMin, tMax, vMin, vMax]);
 
-  if (!all.length) return null;
+  if (!all.length || !vals.length) return null;
 
   return (
     <div className={s.wrap + (fill ? ` ${s.fill}` : '')}>
@@ -263,7 +292,7 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
         {areaPath && <path d={areaPath} fill={`url(#${gid})`} />}
         {seriesList.map((ser, i) => ser.dots ? (
           <g key={i} fill={ser.color ?? color} fillOpacity={ser.opacity ?? 0.8}>
-            {ser.samples.map((p, j) => (
+            {ser.samples.map((p, j) => p.v == null ? null : (
               <circle key={j} cx={x(p.t)} cy={y(p.v)} r={ser.r ?? 3} />
             ))}
           </g>
