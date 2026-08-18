@@ -171,6 +171,15 @@
   position: sticky; top: 0; background: var(--bg); z-index: 1;
 }
 
+.hrScrubRow { display: flex; align-items: center; gap: 12px; margin: 2px 0 8px; flex-shrink: 0; }
+.hrSlider { flex: 1; max-width: 460px; accent-color: var(--lime); }
+
+/* Heartrates tab: the chart fills the pane instead of scrolling in it.
+   The min covers scrub row + chart title + the plot's 130px floor, so
+   the pane never has to scroll to reach the chart. */
+.paneFill { overflow: hidden; display: flex; flex-direction: column; min-height: 200px; }
+.paneFill > *:last-child { flex: 1; min-height: 0; }
+
 .divider {
   display: flex; align-items: center;
   height: 16px; margin: 4px 0 14px;

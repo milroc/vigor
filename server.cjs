@@ -780,20 +780,27 @@ const server = http.createServer((req, res) => {
         if (!hit) continue;
         const w = hit.session;
         const sec = +parts[iSec] + hit.offset;
-        if (!(sec > WARMUP)) continue;
         let a = acc.get(String(w.id));
         if (!a) {
           acc.set(String(w.id), a = {
             wSum: 0, wN: 0, hrSum: 0, hrN: 0, maxHr: 0,
-            h: [[0, 0, 0], [0, 0, 0]], mins: [],
+            h: [[0, 0, 0], [0, 0, 0]], mins: [], hr10: [],
           });
         }
+        const hrRaw = parts[iHr] === '' || parts[iHr] == null ? 0 : +parts[iHr];
+        const hr = hrRaw >= HR_FLOOR ? hrRaw : 0;
+        // Full start→finish 10s HR bins for the overlay chart — unlike the
+        // fitness accumulators, no warmup skip.
+        if (hr > 0) {
+          const b = Math.floor(sec / 10);
+          const bin = a.hr10[b] || (a.hr10[b] = [0, 0]);
+          bin[0] += hr; bin[1]++;
+        }
+        if (!(sec > WARMUP)) continue;
         let wl = iW < 0 || parts[iW] === '' || parts[iW] == null ? null : +parts[iW];
         // Pace is min/mi (lower = faster): invert to mph so the workload
         // scale runs the same direction as power and speed.
         if (wKey === 'pace') wl = wl > 0 ? 60 / wl : null;
-        const hrRaw = parts[iHr] === '' || parts[iHr] == null ? 0 : +parts[iHr];
-        const hr = hrRaw >= HR_FLOOR ? hrRaw : 0;
         if (wl != null) { a.wSum += wl; a.wN++; }
         if (hr > 0) { a.hrSum += hr; a.hrN++; }
         if (hr > a.maxHr) a.maxHr = hr;
@@ -825,6 +832,11 @@ const server = http.createServer((req, res) => {
         // training-load measure.
         const zones = [1, 2, 3, 4, 5].map(z => w[`hr_z${z}_secs`] || 0);
         const zoneTotal = zones.reduce((sum, v) => sum + v, 0);
+        // [secondsFromStart, bpm] pairs; forEach skips sparse-array holes.
+        const hrSeries = [];
+        (a?.hr10 || []).forEach((bin, i) => {
+          if (bin && bin[1]) hrSeries.push([i * 10, Math.round(bin[0] / bin[1])]);
+        });
         const ride = {
           id: w.id, start: w.start, title: w.title,
           avgOutput: a?.wN ? a.wSum / a.wN : null,
@@ -838,6 +850,7 @@ const server = http.createServer((req, res) => {
           distance: w.distance ?? w.total_distance ?? null,
           calories: w.calories ?? w.total_calories ?? null,
           strive: w.strive_score ?? null,
+          hr: hrSeries.length > 1 ? hrSeries : null,
         };
         // EF over sums == meanOutput/meanHr; require ~5min of paired samples.
         if (pairs >= 300) {

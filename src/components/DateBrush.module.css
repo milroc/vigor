@@ -1,0 +1,16 @@
+.wrap { flex: 1; min-width: 220px; height: 44px; position: relative; }
+
+.svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; touch-action: none; user-select: none;
+}
+
+.track { fill: transparent; cursor: crosshair; }
+
+.window {
+  fill: rgba(198, 254, 40, 0.1);
+  stroke: #c6fe28; stroke-opacity: 0.7;
+  cursor: move;
+}
+
+.grip { fill: transparent; cursor: ew-resize; }

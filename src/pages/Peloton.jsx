@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getPelotonWorkouts, getPelotonMetrics, getPelotonFitness, getProfile } from '../api.js';
+import DateBrush from '../components/DateBrush.jsx';
 import LineChart from '../components/LineChart.jsx';
 import { MuscleHighlight } from '../components/MuscleBody.jsx';
 import Splom from '../components/Splom.jsx';
@@ -120,6 +121,9 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
 
   // Bottom pane tab: the workout table or the correlation matrix.
   const [tab, setTab] = useState('table');
+  // Heartrates tab brush window: [fromMs, toMs] over workout start dates
+  // (null = default, the last month).
+  const [hrRange, setHrRange] = useState(null);
   // Chart-area height, adjustable by dragging the divider above the tabs.
   // Starts proportional to the viewport so the bottom pane is visible on
   // any desktop size.
@@ -246,6 +250,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
     return {
       rides,
       workloadKey,
+      hrMax: result.hrMax,
       efSeries: ef?.series, efP: ef?.p,
       outputSeries: output?.series, outputP: output?.p,
       hrSeries: hrSc?.series, hrP: hrSc?.p,
@@ -451,10 +456,74 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
             Correlations
           </button>
         )}
+        {analysis && (
+          <button
+            className={s.chip + (tab === 'hr' ? ` ${s.chipActive}` : '')}
+            onClick={() => setTab('hr')}
+          >
+            Heartrates
+          </button>
+        )}
       </div>
 
-      <div className={s.paneScroll}>
-      {tab === 'splom' && analysis ? (
+      <div className={s.paneScroll + (tab === 'hr' && analysis ? ` ${s.paneFill}` : '')}>
+      {tab === 'hr' && analysis ? (
+        (() => {
+          // Every selected workout's HR trace start→finish on one time
+          // axis over the zone bands (same metaphor as the workout modal).
+          // The date scrubber picks a from→to window; traces inside it
+          // draw at 0.8, the rest fade to 0.2. Defaults to the last month.
+          const withHr = analysis.rides.filter(r => r.hr?.length > 1);
+          if (!withHr.length) {
+            return <p className={s.intro}>No heart-rate traces in this selection.</p>;
+          }
+          const n = withHr.length;
+          const dates = withHr.map(r => new Date(r.start).getTime());
+          const dMin = dates[0], dMax = dates[n - 1];
+          const raw = hrRange ?? [Math.max(dMin, dMax - 30 * DAY), dMax];
+          const lo = Math.max(dMin, Math.min(dMax, raw[0]));
+          const hi = Math.max(lo, Math.min(dMax, raw[1]));
+          const inSel = i => dates[i] >= lo && dates[i] <= hi;
+          const selCount = dates.filter(t => t >= lo && t <= hi).length;
+          const trace = r => r.hr.map(([t, v]) => ({ t, v }));
+          const bands = analysis.hrMax
+            ? ZONE_COLORS.map((c, z) => ({
+              from: ZONE_EDGES[z] * analysis.hrMax,
+              to: ZONE_EDGES[z + 1] * analysis.hrMax,
+              color: c,
+              label: `Z${z + 1}`,
+            }))
+            : undefined;
+          return (
+            <>
+              <div className={s.hrScrubRow}>
+                <DateBrush dates={dates} value={[lo, hi]} onChange={setHrRange} />
+                <span className={s.fitDash}>
+                  {fmtDay(lo)} → {fmtDay(hi)} · {selCount} of {n}
+                </span>
+              </div>
+              <LineChart
+                title="Heart Rate"
+                unit={`BPM · every workout start → finish · zones vs HRmax ${analysis.hrMax ?? '?'} · scrub a date window`}
+                seriesList={[
+                  ...withHr.filter((r, i) => !inSel(i)).map(r => ({
+                    samples: trace(r), opacity: 0.2, width: 1,
+                  })),
+                  ...withHr.filter((r, i) => inSel(i)).map(r => ({
+                    samples: trace(r), opacity: 0.8, width: 1.4,
+                  })),
+                ]}
+                color="#e8e8e0"
+                bands={bands}
+                fill
+                xLabelLeft="0:00"
+                xLabel={fmtZone(Math.max(...withHr.map(r => r.hr[r.hr.length - 1][0])))}
+                tipT={t => fmtZone(Math.max(0, Math.round(t)))}
+              />
+            </>
+          );
+        })()
+      ) : tab === 'splom' && analysis ? (
         <Splom
           data={analysis.rides}
           onPointClick={r => onOpenWorkout(r.id)}
