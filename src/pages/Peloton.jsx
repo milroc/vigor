@@ -53,6 +53,21 @@ function Stat({ label, value, unit }) {
 
 const DAY = 86_400_000;
 
+// Custom analysis sets: named cross-discipline filters. Trainer sessions
+// were logged inconsistently as strength or stretching; the duration
+// histogram shows the cluster runs 42-66 minutes with a clean gap below.
+const TRAINER_MIN = 42 * 60, TRAINER_MAX = 66 * 60;
+const CUSTOM_SETS = {
+  __trainer: {
+    label: 'Trainer sessions',
+    disciplines: ['strength', 'stretching'],
+    minSecs: TRAINER_MIN,
+    maxSecs: TRAINER_MAX,
+    matches: w => ['strength', 'stretching'].includes(w.discipline)
+      && w.duration_secs >= TRAINER_MIN && w.duration_secs <= TRAINER_MAX,
+  },
+};
+
 // Two-tailed p-value for an OLS slope, via the exact t-distribution
 // (regularized incomplete beta, Numerical Recipes continued fraction).
 function gammaln(x) {
@@ -127,11 +142,18 @@ function FitnessPanel({ current, discipline }) {
     setRunning(true);
     setError(null);
     localStorage.setItem('peloWeightLbs', weight);
+    const set = CUSTOM_SETS[title];
     try {
-      setResult(await getPelotonFitness(current.dir, {
-        title, from, to, weightLbs: weight,
-        discipline: discipline === 'all' ? '' : discipline,
-      }));
+      setResult(await getPelotonFitness(current.dir, set
+        ? {
+          from, to, weightLbs: weight,
+          disciplines: set.disciplines.join(','),
+          minSecs: set.minSecs, maxSecs: set.maxSecs,
+        }
+        : {
+          title, from, to, weightLbs: weight,
+          discipline: discipline === 'all' ? '' : discipline,
+        }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -227,6 +249,11 @@ function FitnessPanel({ current, discipline }) {
       <div className={s.fitControls}>
         <select className={s.fitInput} value={title} onChange={e => setTitle(e.target.value)}>
           <option value="">all classes{discipline !== 'all' ? ` (${discipline})` : ''}</option>
+          {Object.entries(CUSTOM_SETS).map(([key, set]) => (
+            <option key={key} value={key}>
+              {set.label} · {(current?.workouts || []).filter(set.matches).length}
+            </option>
+          ))}
           {titles.map(([t, n]) => <option key={t} value={t}>{t} · {n}</option>)}
         </select>
         <input className={s.fitInput} type="date" value={from} onChange={e => setFrom(e.target.value)} />

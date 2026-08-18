@@ -664,19 +664,28 @@ const server = http.createServer((req, res) => {
     }
     try {
       const title = q.get('title'), discipline = q.get('discipline');
+      // Custom sets span disciplines and bound duration, e.g. "trainer
+      // sessions" = strength+stretching at 45-65 minutes.
+      const disciplines = (q.get('disciplines') || '').split(',').filter(Boolean);
+      const minSecs = Number(q.get('minSecs')) || 0;
+      const maxSecs = Number(q.get('maxSecs')) || Infinity;
       const from = q.get('from'), to = q.get('to');
       const weightKg = q.get('weightLbs') ? Number(q.get('weightLbs')) * 0.45359 : null;
       const WARMUP = 120;
       const all = fromCsv(fs.readFileSync(path.join(base, 'workouts.csv'), 'utf8'));
+      const inDiscipline = w =>
+        (disciplines.length ? disciplines.includes(w.discipline) : !discipline || w.discipline === discipline);
       // Personal HRmax proxy: 3rd-highest per-workout max within the requested
-      // discipline — a single strap spike would permanently inflate a plain
+      // discipline(s) — a single strap spike would permanently inflate a plain
       // max, and HRmax differs across modalities.
-      const hrPool = (discipline ? all.filter(w => w.discipline === discipline) : all)
+      const hrPool = ((disciplines.length || discipline) ? all.filter(inDiscipline) : all)
         .map(w => w.max_heart_rate).filter(v => v > 0).sort((a, b) => b - a);
       const hrMax = hrPool.length ? hrPool[Math.min(2, hrPool.length - 1)] : null;
       const workouts = all
         .filter(w => w.status === 'COMPLETE'
-          && (!discipline || w.discipline === discipline)
+          && inDiscipline(w)
+          && (w.duration_secs || 0) >= minSecs
+          && (w.duration_secs || 0) <= maxSecs
           && (!title || (w.title || '') === title)
           && (!from || String(w.start) >= from)
           && (!to || String(w.start).slice(0, 10) <= to))
