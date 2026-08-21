@@ -12,6 +12,7 @@
     "serve": "node server.cjs"
   },
   "dependencies": {
+    "@duckdb/node-api": "^1.5.5-r.4",
     "body-muscles": "^1.0.0",
     "d3-delaunay": "^6.0.4",
     "react": "^19.1.0",

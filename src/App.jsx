@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
 import { runVoltra } from './api.js';
 import Dashboard from './pages/Dashboard.jsx';
-import Backup from './pages/Backup.jsx';
+import Sync from './pages/Sync.jsx';
 import Workout from './pages/Workout.jsx';
 import VizLab from './pages/VizLab.jsx';
 import Peloton from './pages/Peloton.jsx';
@@ -32,7 +32,7 @@ export default function App() {
         <NavLink to="/" className={s.wordmark}>VIGOR<small>HEALTH</small></NavLink>
         <nav className={s.nav}>
           <NavLink to="/" end className={navClass}>Lift</NavLink>
-          <NavLink to="/backup" className={navClass}>Backup</NavLink>
+          <NavLink to="/sync" className={navClass}>Sync</NavLink>
           <NavLink to="/viz" className={navClass}>Movement Report</NavLink>
           <NavLink to="/peloton" className={navClass}>Peloton</NavLink>
         </nav>
@@ -43,7 +43,7 @@ export default function App() {
       </header>
       <Routes>
         <Route path="/" element={<Dashboard status={status} onStatusChange={setStatus} />} />
-        <Route path="/backup" element={<Backup />} />
+        <Route path="/sync" element={<Sync />} />
         <Route path="/workout/:id" element={<Workout />} />
         <Route path="/viz" element={<VizLab />} />
         <Route path="/peloton" element={<Peloton />} />

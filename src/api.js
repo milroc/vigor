@@ -37,3 +37,6 @@ export const saveTargets = targets => post('/api/targets', targets);
 export const listTelemetry = () => get('/api/telemetry');
 export const getTelemetry = workoutId => get(`/api/telemetry/${workoutId}`);
 export const saveTelemetry = (workoutId, data) => post(`/api/telemetry/${workoutId}`, data);
+export const startHealthIngest = () => post('/api/health/ingest');
+export const getHealthIngestStatus = () => get('/api/health/ingest/status');
+export const getHealthSummary = () => get('/api/health/summary');

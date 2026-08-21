@@ -1,0 +1,40 @@
+.main { max-width: 760px; padding: 28px; }
+
+.intro { color: var(--dim); line-height: 1.7; margin-bottom: 20px; }
+.intro strong { color: var(--text); }
+.intro code { color: var(--lime); font-size: 12px; }
+
+.confirmPanel { border-color: var(--lime); }
+.confirmPanel p { color: var(--text); line-height: 1.7; margin-bottom: 16px; }
+
+.confirmRow { display: flex; gap: 10px; }
+.go { background: var(--lime); color: #0a0a08; border-color: var(--lime); }
+.go:hover { filter: brightness(1.1); color: #0a0a08; }
+
+.error { color: var(--red); margin-top: 10px; }
+
+.done { margin-top: 10px; line-height: 1.7; }
+.done .dir { color: var(--lime); font-size: 11px; word-break: break-all; }
+
+.section { padding: 22px 0; border-top: 1px solid var(--line, #222); }
+.prevSection { padding: 22px 0; }
+
+/* Apple Health ingest */
+.track { height: 6px; background: #1a1a17; border-radius: 3px; overflow: hidden; }
+.fill { height: 100%; background: var(--lime); border-radius: 3px; transition: width 0.3s; }
+.indeterminate { width: 40% !important; animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+.progMeta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--dim); }
+.progMeta .phase { color: var(--lime); text-transform: capitalize; }
+
+.statGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+.stat { background: var(--panel, #141412); border: 1px solid var(--line, #222); border-radius: 8px; padding: 14px; }
+.stat .k { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.stat .v { font-size: 22px; color: var(--text); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.stat .sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
+
+.metricBars { margin-top: 8px; }
+.metricRow { display: grid; grid-template-columns: 180px 1fr 70px; align-items: center; gap: 10px; padding: 3px 0; font-size: 12px; }
+.metricRow .name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metricRow .bar { height: 8px; background: var(--lime); border-radius: 2px; opacity: 0.8; }
+.metricRow .num { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }

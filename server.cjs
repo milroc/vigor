@@ -12,6 +12,38 @@ const VOLTRA_BIN = fs.existsSync(path.join(os.homedir(), '.voltra/bin/voltra'))
   ? path.join(os.homedir(), '.voltra/bin/voltra')
   : 'voltra';
 
+// Apple Health store: DuckDB over partitioned Parquet under store/. The
+// connection is created lazily (first ingest or query) so the server has no
+// hard dependency on the native binding until the feature is used.
+const { healthState, runHealthIngest, setupViews, STORE } = require('./scripts/ingestHealth.cjs');
+// Trainer-session reproduction logic lives with its ground-truth labels.
+let _duckCon = null, _duckInit = null;
+function duck() {
+  if (_duckCon) return Promise.resolve(_duckCon);
+  if (!_duckInit) _duckInit = (async () => {
+    const { DuckDBInstance } = require('@duckdb/node-api');
+    fs.mkdirSync(path.join(__dirname, 'store'), { recursive: true });
+    const inst = await DuckDBInstance.create(path.join(__dirname, 'store', 'app.duckdb'));
+    const con = await inst.connect();
+    await setupViews(con).catch(() => {}); // no-op until the first ingest exists
+    _duckCon = con;
+    return con;
+  })();
+  return _duckInit;
+}
+
+// Newest backups/*-apple-health/ dir that still holds its source export.zip.
+function latestHealthBackup() {
+  const root = path.join(__dirname, 'backups');
+  if (!fs.existsSync(root)) return null;
+  const dir = fs.readdirSync(root)
+    .filter(n => n.endsWith('-apple-health') && fs.existsSync(path.join(root, n, 'export.zip')))
+    .sort((a, b) => b.localeCompare(a))[0];
+  return dir ? { dir: path.join(root, dir), zip: path.join(root, dir, 'export.zip') } : null;
+}
+
+const READ_ONLY_SQL = /^\s*(SELECT|WITH|DESCRIBE|SUMMARIZE|EXPLAIN|PRAGMA|SHOW|VALUES|FROM)\b/i;
+
 // Only commands the dashboard needs. Excludes config/logs/skills/daemon/update
 // so the browser can never touch keys, logs, or the install.
 const ALLOWED_COMMANDS = new Set([
@@ -614,15 +646,15 @@ const server = http.createServer((req, res) => {
     return json(res, 200, { ok: true, data: pelotonState });
   }
 
-  // Hand-maintained profile (manual/profile.json): analysis parameters the
+  // Hand-maintained profile (labels/profile.json): analysis parameters the
   // APIs cannot provide — body weight, age, sex. Future: Apple Health.
   if (req.method === 'GET' && pathname === '/api/profile') {
-    const file = path.join(__dirname, 'manual', 'profile.json');
+    const file = path.join(__dirname, 'labels', 'profile.json');
     if (!fs.existsSync(file)) return json(res, 200, { ok: true, data: {} });
     try {
       return json(res, 200, { ok: true, data: JSON.parse(fs.readFileSync(file, 'utf8')) });
     } catch {
-      return json(res, 500, { ok: false, error: 'manual/profile.json is corrupt' });
+      return json(res, 500, { ok: false, error: 'labels/profile.json is corrupt' });
     }
   }
 
@@ -925,6 +957,44 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && pathname === '/api/backups') {
     return json(res, 200, { ok: true, data: listBackups() });
+  }
+
+  // --- Apple Health ingest + query (DuckDB/Parquet store) ---
+  if (req.method === 'POST' && pathname === '/api/health/ingest') {
+    if (!requireJson(req, res)) return;
+    if (healthState.running) return json(res, 409, { ok: false, error: 'ingest already running' });
+    const found = latestHealthBackup();
+    if (!found) return json(res, 400, { ok: false, error: 'no apple-health backup with export.zip under backups/' });
+    duck()
+      .then(con => runHealthIngest(con, found.zip, found.dir))
+      .catch(() => { /* errors surface via healthState.phase */ });
+    return json(res, 202, { ok: true, data: { started: true } });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/health/ingest/status') {
+    return json(res, 200, { ok: true, data: healthState });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/health/summary') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: { ingested: false } });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const one = async sql => (await con.runAndReadAll(sql)).getRowObjectsJson();
+      const [overview] = await one(
+        `SELECT count(*) AS records, count(DISTINCT metric) AS metrics,
+                min(start_ts)::VARCHAR AS from_ts, max(start_ts)::VARCHAR AS to_ts FROM ah_records`);
+      const top = await one(`SELECT metric, count(*) AS n FROM ah_records GROUP BY 1 ORDER BY n DESC LIMIT 20`);
+      const sources = await one(`SELECT source, count(*) AS n FROM ah_records GROUP BY 1 ORDER BY n DESC LIMIT 12`);
+      let workouts = [];
+      if (fs.existsSync(path.join(STORE, 'workouts.parquet'))) {
+        workouts = await one(`SELECT activity, count(*) AS n, round(sum(duration)/60, 1) AS hours
+                              FROM ah_workouts GROUP BY 1 ORDER BY n DESC LIMIT 20`);
+      }
+      json(res, 200, { ok: true, data: { ingested: true, overview, top, sources, workouts } });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
   }
 
   if (req.method === 'GET' && pathname === '/api/telemetry') {
