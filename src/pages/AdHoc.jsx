@@ -87,11 +87,13 @@ export default function AdHoc() {
 
   const refreshList = () => listAnalyses().then(d => setAnalyses(d.analyses)).catch(e => setError(e.message));
   useEffect(() => { refreshList(); }, []);
-  useEffect(() => { chatRef.current?.scrollTo(0, 1e9); }, [messages, agentBusy]);
+  useEffect(() => { const el = chatRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, agentBusy]);
 
   // Result patches keep the notebook clean (not "dirty"); edits mark dirty.
   const setCell = (cid, patch) => setNb(n => n ? { ...n, cells: n.cells.map(c => c.cid === cid ? { ...c, ...patch } : c) } : n);
   const patchCell = (cid, patch) => setNb(n => ({ ...n, dirty: true, cells: n.cells.map(c => c.cid === cid ? { ...c, ...patch } : c) }));
+  const addCell = (cell = newCell()) => setNb(n => n ? { ...n, dirty: true, cells: [...n.cells, cell] } : n);
+  const removeCell = cid => setNb(n => ({ ...n, dirty: true, cells: n.cells.filter(c => c.cid !== cid) }));
 
   // Takes the cell object (not an id) so it works even before setNb commits.
   const runCell = async cell => {
@@ -125,10 +127,9 @@ export default function AdHoc() {
 
   const addCellFromAgent = d => {
     const cell = newCell({ title: d.title, sql: d.sql, cols: d.columns, rows: d.rows, rowCount: d.rowCount, hasRun: true, viz: d.viz || null });
-    setNb(n => n
-      ? { ...n, dirty: true, cells: [...n.cells, cell] }
-      : { name: null, title: d.title || 'New analysis', description: d.explanation || '', cells: [cell], dirty: true });
-    if (!nb) { setSelName(null); setView(null); }
+    if (nb) { addCell(cell); return; }
+    setNb({ name: null, title: d.title || 'New analysis', description: d.explanation || '', cells: [cell], dirty: true });
+    setSelName(null); setView(null);
   };
   const ask = async (text, history) => {
     const convo = [...(history ?? messages), { role: 'user', text }];
@@ -171,7 +172,9 @@ export default function AdHoc() {
         <button className={a.newBtn} onClick={newAnalysis}>+ New analysis</button>
         <div className={a.list}>
           {analyses.map(x => (
-            <div key={x.name} className={`${a.item} ${selName === x.name ? a.on : ''}`} onClick={() => select(x)}>
+            <div key={x.name} className={`${a.item} ${selName === x.name ? a.on : ''}`}
+              role="button" tabIndex={0} onClick={() => select(x)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(x); } }}>
               <div className={a.itemMain}>
                 <div className={a.ti}>{x.title}</div>
                 <div className={a.mi}>{x.kind === 'saved' ? 'notebook · editable' : 'built-in module'}</div>
@@ -205,7 +208,7 @@ export default function AdHoc() {
                   <div className={a.cellHd}>
                     <input className={a.cellTitle} value={c.title} placeholder={`Cell ${i + 1}`} onChange={e => patchCell(c.cid, { title: e.target.value })} />
                     <button className={a.cellBtn} onClick={() => runCell(c)} disabled={c.running || !c.sql.trim()}>{c.running ? '…' : '▶ Run'}</button>
-                    <button className={a.cellBtn} onClick={() => setNb(n => ({ ...n, dirty: true, cells: n.cells.filter(x => x.cid !== c.cid) }))}>✕</button>
+                    <button className={a.cellBtn} onClick={() => removeCell(c.cid)}>✕</button>
                   </div>
                   <textarea
                     className={a.sqlInput} value={c.sql} spellCheck={false}
@@ -229,7 +232,7 @@ export default function AdHoc() {
                   ) : <div className={a.cellEmpty}>0 rows</div>)}
                 </div>
               ))}
-              <button className={a.addCell} onClick={() => setNb(n => ({ ...n, dirty: true, cells: [...n.cells, newCell()] }))}>+ Add cell</button>
+              <button className={a.addCell} onClick={() => addCell()}>+ Add cell</button>
               <p className={a.tip}>Write SQL over the parquet views, or ask the agent (right) to draft a cell. ⌘↵ runs a cell.</p>
             </>
           )}
