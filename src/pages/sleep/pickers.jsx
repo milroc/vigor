@@ -35,11 +35,11 @@ export function DateStepper({ label, sub, tip, onPrev, onNext, onLabel, labelRef
       onMouseEnter={() => { setHov(true); onHoverOpen?.(); }}
       onMouseLeave={() => { setHov(false); onHoverClose?.(); }}
       onPointerMove={e => e.stopPropagation()}>
-      <button className={s.stepArrow} onClick={onPrev} disabled={!canPrev} aria-label="previous">‹</button>
+      <button className={s.stepArrow} onClick={onPrev} disabled={!canPrev} aria-label="Previous night or range">‹</button>
       {onLabel
         ? <button ref={labelRef} className={s.stepDateBtn} onClick={onLabel}>{label}{sub}</button>
         : <span className={s.stepDate}>{label}{sub}</span>}
-      <button className={s.stepArrow} onClick={onNext} disabled={!canNext} aria-label="next">›</button>
+      <button className={s.stepArrow} onClick={onNext} disabled={!canNext} aria-label="Next night or range">›</button>
       {hov && tip && !onHoverOpen && <span className={s.infoPop}>{tip}</span>}
     </span>
   );
@@ -146,14 +146,14 @@ export function RangePicker({ min, max, init, onApply, activeRange, activeGran, 
             </div>
           </div>
           <div className={s.calNav}>
-            <button className={s.calArrow} onClick={() => step(-1)} disabled={!canPrev} aria-label="previous month">‹</button>
-            <button className={s.calArrow} onClick={() => step(1)} disabled={!canNext} aria-label="next month">›</button>
+            <button className={s.calArrow} onClick={() => step(-1)} disabled={!canPrev} aria-label="Previous month">‹</button>
+            <button className={s.calArrow} onClick={() => step(1)} disabled={!canNext} aria-label="Next month">›</button>
           </div>
           <div className={s.calMonths}>
             <MonthGrid year={view.y} month={view.m} min={min} max={max} sel={sel} preview={preview} onPick={pick} onHover={setHoverDay} />
             <MonthGrid year={next.y} month={next.m} min={min} max={max} sel={sel} preview={preview} onPick={pick} onHover={setHoverDay} />
           </div>
-          <div className={s.pickHint}>Click a start then an end day · pick the same day twice to open that night.</div>
+          <div className={s.pickHint}>Click a start day, then an end day. Click the same day twice to open that night.</div>
           {brush}
           {hint && <div className={s.pickHint}>{hint}</div>}
         </div>
@@ -204,11 +204,11 @@ export function NightDatePicker({ min, max, day, onPick, onClose, anchorRef }) {
       style={{ top: pos ? pos.top : 0, left: pos ? pos.left : 0, visibility: pos ? 'visible' : 'hidden' }}>
       <div className={s.pickMain}>
         <div className={s.calNav}>
-          <button className={s.calArrow} onClick={() => step(-1)} disabled={!canPrev} aria-label="previous month">‹</button>
-          <button className={s.calArrow} onClick={() => step(1)} disabled={!canNext} aria-label="next month">›</button>
+          <button className={s.calArrow} onClick={() => step(-1)} disabled={!canPrev} aria-label="Previous month">‹</button>
+          <button className={s.calArrow} onClick={() => step(1)} disabled={!canNext} aria-label="Next month">›</button>
         </div>
         <MonthGrid year={view.y} month={view.m} min={min} max={max} sel={[day, day]} preview={[null, null]} onPick={onPick} onHover={() => {}} />
-        <div className={s.pickHint}>Pick a night to view its sleep.</div>
+        <div className={s.pickHint}>Pick a night to jump to it.</div>
       </div>
     </div>
   );

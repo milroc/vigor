@@ -239,7 +239,7 @@ export function NightModal({ night, naps, extra = {}, onClose, onStep, onPickDat
             {/* The whole date title is the affordance: hover (or keyboard-focus)
                 reveals an inline edit icon + label that opens the single-date picker. */}
             <button ref={changeRef} className={s.modalTitleRow}
-              aria-expanded={picking} aria-label="change date"
+              aria-expanded={picking} aria-label="Change the date"
               onClick={() => setPicking(p => !p)}>
               <span className={s.modalTitle}>{title}</span>
               <span className={s.changeDate} aria-hidden="true">
@@ -272,7 +272,7 @@ export function NightModal({ night, naps, extra = {}, onClose, onStep, onPickDat
             <Stat value={hm(night.rem)} label="rem" />
             <Stat value={hm(night.core)} label="core" />
             <Stat value={hm(night.awake)} label="awake" />
-            <Stat value={`${night.wakeCount} · ${night.briefWakes}`} label="wakes · brief" />
+            <Stat value={`${night.wakeCount} · ${night.briefWakes}`} label="full · brief wakes" />
             {(night.tibBefore + night.tibAfter) > 0 && <Stat value={hm(night.tibBefore + night.tibAfter)} label="extra in bed" />}
             {naps.length > 0 && <Stat value={naps.map(p => hm(p.asleep)).join(', ')} label={naps.length > 1 ? 'naps' : 'nap'} />}
           </div>
@@ -285,12 +285,12 @@ export function NightModal({ night, naps, extra = {}, onClose, onStep, onPickDat
             {extra.debt > 0.5 && <Stat value={hm(extra.debt)} label="sleep debt" />}
             {extra.nextHrv != null && <Stat value={extra.nextHrv} unit="ms" label="next-day HRV" />}
             {extra.load != null && <Stat value={Math.round(extra.load).toLocaleString()} unit="kcal" label="training load" />}
-            {extra.bedStd != null && <Stat value={`${Math.round(extra.bedStd)} / ${Math.round(extra.wakeStd)}`} unit="min" label="bed / wake σ" />}
+            {extra.bedStd != null && <Stat value={`${Math.round(extra.bedStd)} / ${Math.round(extra.wakeStd)}`} unit="min" label="bed / wake swing (14n)" />}
           </div>
         </div>
         <div className={s.miniLabel} style={{ marginLeft: 0 }}>Sleep stages &amp; overnight vitals</div>
         <NightDetail night={night} detail={detail} />
-        <div className={s.modalStepHint}>← → to step through nights</div>
+        <div className={s.modalStepHint}>Press ← → to move between nights</div>
       </section>
     </div>
   );

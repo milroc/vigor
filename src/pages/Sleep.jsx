@@ -377,13 +377,13 @@ export default function Sleep() {
     };
   }, [data, win, napByDay]);
 
-  if (error) return <main className={s.main}><div className={s.error}>Apple Health data unavailable: {error}</div></main>;
+  if (error) return <main className={s.main}><div className={s.error}>Couldn't load your Apple Health data: {error}</div></main>;
   if (!data) return <main className={s.main} />;
   if (!data.nights.length) {
     return (
       <main className={s.main}>
         <div className={s.headRow}><h2 className={shared.title}>Sleep</h2></div>
-        <p className={s.intro}>No sleep data yet — ingest an <strong>export.zip</strong> from the <strong>Sync</strong> tab. Sleep stages come from the Apple Watch worn overnight, starting late 2021.</p>
+        <p className={s.intro}>No sleep data yet. Import an <strong>export.zip</strong> from the <strong>Sync</strong> tab to load it. Stage data starts in late 2021, whenever the Apple Watch was worn overnight.</p>
       </main>
     );
   }
@@ -397,15 +397,15 @@ export default function Sleep() {
             <div className={s.titleRow}>
               <h2 className={shared.title}>Sleep</h2>
               <InfoTip wide forceOpen={nux} onDismiss={dismissNux}>
-                <strong>Welcome to Sleep.</strong> Every night since 2021 from the Apple Watch, shown in <strong>local time</strong> (travel normalized). Pick a range at top-right or drag the <strong>date selector's</strong> edges; hover any chart to inspect a night — every panel moves together.
+                <strong>Welcome to Sleep.</strong> Every night since 2021, recorded by the Apple Watch and shown in <strong>local time</strong> (so travel doesn't skew it). Set a range at the top right, or drag the edges of the <strong>date selector</strong>. Hover any chart to inspect a single night; all the panels move together.
               </InfoTip>
             </div>
             {summary && (
               <div className={s.stats}>
                 <Stat value={summary.nights} label="nights" />
-                <Stat value={hm(summary.asleep)} label="avg sleep" />
-                <Stat value={summary.eff != null ? summary.eff.toFixed(1) : '—'} unit="%" label="efficiency" />
-                <Stat value={summary.resp != null ? summary.resp.toFixed(1) : '—'} unit="br/min" label="avg resp" />
+                <Stat value={hm(summary.asleep)} label="avg asleep" />
+                <Stat value={summary.eff != null ? summary.eff.toFixed(1) : '—'} unit="%" label="avg efficiency" />
+                <Stat value={summary.resp != null ? summary.resp.toFixed(1) : '—'} unit="br/min" label="avg breathing" />
                 <Stat value={hm(summary.deep)} label="deep / night" />
                 <Stat value={summary.naps} label="naps" />
               </div>
@@ -426,8 +426,8 @@ export default function Sleep() {
                 label = `${fa} – ${fb}`;
               }
               const tip = hovered
-                ? <>Use the <strong>← →</strong> arrow keys to step to the previous / next night with data.</>
-                : <>Use the <strong>← →</strong> arrow keys to page the visible date range. Hover a night to step through individual dates instead.</>;
+                ? <>Press <strong>← →</strong> to jump to the previous or next night with data.</>
+                : <>Press <strong>← →</strong> to page the date range. Hover a night to step one date at a time instead.</>;
               return (
                 <span className={s.stepWrap}>
                   <DateStepper label={label} sub={sub} onPrev={stepLeft} onNext={stepRight}
@@ -456,12 +456,12 @@ export default function Sleep() {
 
         <div className={`${s.block} ${s.skyBlock}`} data-section="timing">
           <div className={s.chartHead}><h3 className={shared.title}>When You Slept</h3>
-            <InfoTip>One column per night · y = <strong>clock time</strong> (bed top → wake bottom) · colored by stage · main sleep only. <strong>Click a night</strong> for its stage-by-stage hypnogram.</InfoTip>
+            <InfoTip>One column per night. The y-axis is <strong>clock time</strong> (bedtime at the top, wake at the bottom), colored by stage. Main sleep only. <strong>Click a night</strong> to open its full hypnogram.</InfoTip>
             <Legend items={[
-              { glyph: 'square', color: STAGE.deep, label: 'Deep', tip: <><strong>Deep</strong> sleep — colored band in each night's column at the clock time you were in this stage.</> },
-              { glyph: 'square', color: STAGE.core, label: 'Core', tip: <><strong>Core</strong> (light) sleep — the bulk of most nights.</> },
-              { glyph: 'square', color: STAGE.rem, label: 'REM', tip: <><strong>REM</strong> — dreaming sleep, clustered toward morning.</> },
-              { glyph: 'square', color: STAGE.awake, label: 'Awake', tip: <>Brief <strong>awakenings</strong> during the night.</> },
+              { glyph: 'square', color: STAGE.deep, label: 'Deep', tip: <><strong>Deep</strong> sleep. Each band sits at the clock time you were in this stage.</> },
+              { glyph: 'square', color: STAGE.core, label: 'Core', tip: <><strong>Core</strong> (light) sleep. Most of a typical night.</> },
+              { glyph: 'square', color: STAGE.rem, label: 'REM', tip: <><strong>REM</strong>, the dreaming stage. Tends to cluster toward morning.</> },
+              { glyph: 'square', color: STAGE.awake, label: 'Awake', tip: <>Moments you woke up during the night.</> },
             ]} /></div>
           {win && <Skyline nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} fill section="timing" />}
         </div>
@@ -470,68 +470,68 @@ export default function Sleep() {
       <div className={s.scroller} ref={scrollRef}>
       <div className={s.block} data-section="stages">
         <div className={s.chartHead}><h3 className={shared.title}>Stage Composition</h3>
-          <InfoTip>Per-night stage minutes over the selected range · stacked <strong>Deep / Core / REM / Awake</strong> · capped at 10h, longer nights overflow the top.{summary ? ` Showing ${summary.from} → ${summary.to}.` : ''}</InfoTip>
+          <InfoTip>How each night breaks down by stage. One bar per night, stacking <strong>Deep / Core / REM / Awake</strong> minutes. The axis caps at 10h; taller nights spill over the top.{summary ? ` Showing ${summary.from} → ${summary.to}.` : ''}</InfoTip>
           <Legend items={[
-            { glyph: 'square', color: STAGE.deep, label: 'Deep', tip: <>Minutes of <strong>Deep</strong> sleep, stacked bottom-to-top with Core, REM and Awake.</> },
+            { glyph: 'square', color: STAGE.deep, label: 'Deep', tip: <>Minutes of <strong>Deep</strong> sleep, at the bottom of the stack.</> },
             { glyph: 'square', color: STAGE.core, label: 'Core', tip: <>Minutes of <strong>Core</strong> (light) sleep in the stack.</> },
             { glyph: 'square', color: STAGE.rem, label: 'REM', tip: <>Minutes of <strong>REM</strong> sleep in the stack.</> },
-            { glyph: 'square', color: STAGE.awake, label: 'Awake', tip: <>Minutes <strong>awake</strong> during the night, on top of the stack.</> },
-            { glyph: 'square', color: INBED_PRE, label: 'In bed · pre', tip: <>Time <strong>in bed before</strong> falling asleep (2021–24), a faded cap under the stack.</> },
-            { glyph: 'square', color: INBED_POST, label: 'In bed · post', tip: <>Time <strong>in bed after</strong> waking (2021–24), a faded cap above the stack.</> },
+            { glyph: 'square', color: STAGE.awake, label: 'Awake', tip: <>Minutes spent <strong>awake</strong>, at the top of the stack.</> },
+            { glyph: 'square', color: INBED_PRE, label: 'In bed · pre', tip: <>Time in bed <strong>before</strong> you fell asleep (2021–24). Faded cap below the stack.</> },
+            { glyph: 'square', color: INBED_POST, label: 'In bed · post', tip: <>Time in bed <strong>after</strong> you woke (2021–24). Faded cap above the stack.</> },
           ]} /></div>
         {win && <Composition nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="stages" />}
       </div>
 
       <div className={s.block} data-section="consistency">
         <div className={s.chartHead}><h3 className={shared.title}>Consistency</h3>
-          <InfoTip>Minutes from your <strong>target</strong> (bed {targets.bedtime} · wake {targets.wake}), signed — <strong>below the line = earlier</strong>, above = later. Dots are each night; the line is the 14-night rolling average. Below, <strong>time in daylight</strong> the day before — a circadian <strong>input</strong> to getting to bed on time.</InfoTip>
+          <InfoTip>How far each night ran from your <strong>target</strong> (bed {targets.bedtime}, wake {targets.wake}), in minutes. <strong>Below the line is earlier</strong> than target, above is later. Each dot is one night; the line is a 14-night rolling average. The bars below show <strong>time in daylight</strong> the day before, which nudges when you get to bed.</InfoTip>
           <Legend items={[
-            { glyph: 'linedot', color: BED_TGT, label: 'Bedtime vs target', tip: <>Minutes your <strong>bedtime</strong> differed from target — a <strong>dot</strong> per night, the <strong>line</strong> is the 14-night average. Below 0 = earlier.</> },
-            { glyph: 'linedot', color: WAKE_TGT, label: 'Wake vs target', tip: <>Minutes your <strong>wake time</strong> differed from target — dot per night, line = 14-night average.</> },
-            { glyph: 'bar', color: DAYLIGHT, label: 'Daylight (prev day)', tip: <><strong>Time in daylight</strong> (min) the day <strong>before</strong> this night — a leading circadian <strong>input</strong> to bedtime. Watch-only; low values can also mean the Watch wasn't worn.</> },
+            { glyph: 'linedot', color: BED_TGT, label: 'Bedtime vs target', tip: <>How many minutes your <strong>bedtime</strong> ran off target. One <strong>dot</strong> per night; the <strong>line</strong> is the 14-night average. Below 0 means earlier.</> },
+            { glyph: 'linedot', color: WAKE_TGT, label: 'Wake vs target', tip: <>How many minutes your <strong>wake time</strong> ran off target. One dot per night; line is the 14-night average.</> },
+            { glyph: 'bar', color: DAYLIGHT, label: 'Daylight (prev day)', tip: <><strong>Time in daylight</strong> (min) the day <strong>before</strong> this night, which feeds into your body clock and bedtime. Watch-only, so a low bar can also mean the Watch was off your wrist.</> },
           ]} /></div>
         {win && <Consistency nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="consistency" />}
-        {win && series && <div className={s.subChart}><SubLabel label="Time in daylight (previous day)" tip={<><strong>Time in daylight</strong> (min) accumulated the day <strong>before</strong> each night — the daytime that precedes that evening's bedtime, so it reads as a leading circadian <strong>input</strong>. Watch-only (from 2023-09); a low bar can mean little daylight <strong>or</strong> the Watch wasn't worn.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => daylightByDay[data.nights[i].day] ?? null} color={DAYLIGHT} unit="min" label="Time in daylight (previous day)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="consistency" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Time in daylight (previous day)" tip={<><strong>Time in daylight</strong> (min) racked up the day <strong>before</strong> each night, so it lines up as the daytime that leads into that evening's bedtime. Watch-only (from 2023-09); a low bar can mean little daylight <strong>or</strong> that the Watch was off.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => daylightByDay[data.nights[i].day] ?? null} color={DAYLIGHT} unit="min" label="Time in daylight (previous day)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="consistency" /></div>}
       </div>
 
       <div className={s.block} data-section="recovery">
         <div className={s.chartHead}><h3 className={shared.title}>Recovery</h3>
-          <InfoTip><strong>Nap length</strong> rises above the axis; <strong>sleep debt</strong> (3-night rolling shortfall under 7h) hangs below. <strong>Next-day HRV</strong> (HRV the night after), <strong>following-day resting HR</strong>, and daily <strong>training load</strong> are their own aligned charts — poor sleep or high load tends to drop next-day HRV and lift resting HR.</InfoTip>
+          <InfoTip><strong>Nap length</strong> rises above the axis; <strong>sleep debt</strong> (how far the last 3 nights fell under 7h) hangs below. The charts under it track how your body responds: <strong>HRV the next night</strong>, <strong>resting HR the next day</strong>, and daily <strong>training load</strong>. A rough night or a hard workout usually drops the next day's HRV and raises resting HR.</InfoTip>
           <Legend items={[
-            { glyph: 'bar', color: NAP, label: 'Nap', tip: <><strong>Nap length</strong> that day, rising above the axis. Brighter = it followed a sleep deficit.</> },
-            { glyph: 'bar', color: DEBT, label: 'Sleep debt', tip: <><strong>Sleep debt</strong> — 3-night rolling shortfall under 7h, hanging below the axis.</> },
-            { glyph: 'box', color: HRV, label: 'Next-day HRV', tip: <>HRV the night <strong>after</strong> each day (ms). Box = middle 50%, whiskers = min–max, tick = median.</> },
-            { glyph: 'bubble', color: RHR, label: 'Following-day RHR', tip: <>Apple's <strong>resting HR</strong> the day <strong>after</strong> each night (bpm) — bubble <strong>area</strong> ∝ value within the window. A rising resting HR flags under-recovery.</> },
-            { glyph: 'bar', color: LOAD, label: 'Training load', tip: <>Daily <strong>active energy</strong> burned (kcal), as bars.</> },
+            { glyph: 'bar', color: NAP, label: 'Nap', tip: <>How long you <strong>napped</strong> that day, rising above the axis. Brighter means the nap followed a sleep deficit.</> },
+            { glyph: 'bar', color: DEBT, label: 'Sleep debt', tip: <><strong>Sleep debt</strong>: how far the last 3 nights fell short of 7h, hanging below the axis.</> },
+            { glyph: 'box', color: HRV, label: 'Next-day HRV', tip: <>HRV the night <strong>after</strong> each day (ms). Box is the middle 50%, whiskers are min–max, tick is the median.</> },
+            { glyph: 'bubble', color: RHR, label: 'Following-day RHR', tip: <>Apple's <strong>resting HR</strong> the day <strong>after</strong> each night (bpm). Bubble <strong>area</strong> scales with the value across the window. A rising resting HR points to poor recovery.</> },
+            { glyph: 'bar', color: LOAD, label: 'Training load', tip: <><strong>Active energy</strong> burned that day (kcal), drawn as bars.</> },
           ]} /></div>
-        {win && <div className={s.subChart}><SubLabel label="Naps & sleep debt" tip={<>A diverging chart on the shared date axis: <strong>nap length</strong> rises above the zero line (brighter = the nap followed a sleep deficit); <strong>sleep debt</strong> — the 3-night rolling shortfall under 7h — hangs below.</>} /><NapsPanel nights={data.nights} napDays={napDays} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="The morning after" tip={<>How the next day looked: <strong>next-day HRV</strong> (ms) as box-plots — box = middle 50%, whiskers = min–max, tick = median — with <strong>following-day resting HR</strong> (bpm) area-encoded as a bubble lane beneath (bubble <strong>area</strong> ∝ value within the window). Poor sleep tends to <strong>drop</strong> HRV and <strong>lift</strong> resting HR.</>} /><NextDayCombo nights={data.nights} win={win} hrvByDay={nextHrvByDay} rhrByDay={followRhrByDay} hrvColor={HRV} rhrColor={RHR} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Training load (active energy)" tip={<>Daily <strong>active energy</strong> burned (kcal) as bars — a proxy for <strong>training load</strong>, which can suppress the following night's recovery.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => byDay.load[data.nights[i].day] ?? null} color={LOAD} unit="kcal" label="Training load (active energy)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
+        {win && <div className={s.subChart}><SubLabel label="Naps & sleep debt" tip={<>Two series meeting at a zero line. <strong>Nap length</strong> rises above it (brighter if the nap followed a sleep deficit); <strong>sleep debt</strong> — how far the last 3 nights fell under 7h — hangs below.</>} /><NapsPanel nights={data.nights} napDays={napDays} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="The morning after" tip={<>How your body looked the next day. <strong>Next-day HRV</strong> (ms) as box-plots — box is the middle 50%, whiskers are min–max, tick is the median — with <strong>next-day resting HR</strong> (bpm) as the bubble lane beneath (bubble <strong>area</strong> scales with the value across the window). A rough night usually <strong>drops</strong> HRV and <strong>raises</strong> resting HR.</>} /><NextDayCombo nights={data.nights} win={win} hrvByDay={nextHrvByDay} rhrByDay={followRhrByDay} hrvColor={HRV} rhrColor={RHR} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Training load (active energy)" tip={<>Daily <strong>active energy</strong> burned (kcal) as bars, a stand-in for <strong>training load</strong>. A heavy day can eat into the next night's recovery.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => byDay.load[data.nights[i].day] ?? null} color={LOAD} unit="kcal" label="Training load (active energy)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
       </div>
 
       <div className={s.block} data-section="respiration">
         <div className={s.chartHead}><h3 className={shared.title}>Respiration</h3>
-          <InfoTip>Per-night <strong>respiratory rate</strong> box-plots (box = middle 50%, whiskers = min–max). The lower lanes' <strong>bubbles</strong> area-encode <strong>breathing disturbances</strong> (coral), <strong>brief &lt;10m wake-ups</strong> (orange), and <strong>full wake-up minutes</strong> (red — time in awakenings ≥10m). <strong>SpO₂</strong> has its own box-plot below.</InfoTip>
+          <InfoTip>Each night's <strong>breathing rate</strong> as a box-plot (box is the middle 50%, whiskers are min–max). The lanes underneath size their <strong>bubbles</strong> by count: <strong>breathing disturbances</strong> (coral), <strong>brief wake-ups under 10 min</strong> (orange), and <strong>time awake in stretches of 10 min or more</strong> (red). <strong>SpO₂</strong> gets its own box-plot below.</InfoTip>
           <Legend items={[
-            { glyph: 'box', color: RESP, label: 'Resp rate', tip: <>Overnight <strong>respiratory rate</strong> (br/min). Box = middle 50%, whiskers = min–max, tick = median.</> },
-            { glyph: 'bubble', color: DIST, label: 'Disturbances', tip: <><strong>Breathing disturbances</strong> per night — bubble <strong>area</strong> encodes the count (2025-10+).</> },
-            { glyph: 'bubble', color: STAGE.awake, label: 'Brief wake-ups', tip: <>Brief <strong>&lt;10-min wake-ups</strong> — bubble <strong>area</strong> encodes the count.</> },
-            { glyph: 'bubble', color: FULLWAKE, label: 'Full wake mins', tip: <><strong>Full wake-up minutes</strong> — total time spent in awakenings <strong>≥10 min</strong>; bubble <strong>area</strong> encodes the minutes.</> },
-            { glyph: 'box', color: SPO2, label: 'SpO₂', tip: <>Overnight <strong>blood-oxygen %</strong>. Box = middle 50%, whiskers = min–max, tick = median.</> },
+            { glyph: 'box', color: RESP, label: 'Resp rate', tip: <>Overnight <strong>breathing rate</strong> (breaths/min). Box is the middle 50%, whiskers are min–max, tick is the median.</> },
+            { glyph: 'bubble', color: DIST, label: 'Disturbances', tip: <><strong>Breathing disturbances</strong> flagged that night. Bigger bubble means more (from 2025-10).</> },
+            { glyph: 'bubble', color: STAGE.awake, label: 'Brief wake-ups', tip: <>Wake-ups <strong>under 10 min</strong>. Bigger bubble means more of them.</> },
+            { glyph: 'bubble', color: FULLWAKE, label: 'Full wake mins', tip: <>Total minutes awake in stretches of <strong>10 min or more</strong>. Bigger bubble means more time awake.</> },
+            { glyph: 'box', color: SPO2, label: 'SpO₂', tip: <>Overnight <strong>blood-oxygen %</strong>. Box is the middle 50%, whiskers are min–max, tick is the median.</> },
           ]} /></div>
-        {win && series && <div className={s.subChart}><SubLabel label="Respiratory rate" tip={<>Overnight <strong>respiratory rate</strong> (br/min) per night as box-plots — <strong>box</strong> = middle 50%, <strong>whiskers</strong> = min–max, <strong>tick</strong> = median. The lower lanes' <strong>bubbles</strong> area-encode breathing disturbances, brief &lt;10-min wake-ups, and full wake-up minutes.</>} /><RespirationChart nights={data.nights} win={win} respBy={byDay.resp} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="respiration" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Blood oxygen (SpO₂)" tip={<>Overnight <strong>blood-oxygen %</strong> per night as box-plots — box = middle 50%, whiskers = min–max, tick = median. Sparse: only nights the Watch/iPhone recorded SpO₂ (ends 2025-10).</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.spo2} color={SPO2} unit="%" label="Blood oxygen (SpO₂)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} H={120} padL={padL} section="respiration" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Respiratory rate" tip={<>Each night's <strong>breathing rate</strong> (breaths/min) as a box-plot — <strong>box</strong> is the middle 50%, <strong>whiskers</strong> are min–max, <strong>tick</strong> is the median. The lanes below size their <strong>bubbles</strong> by breathing disturbances, brief wake-ups under 10 min, and total minutes awake in longer stretches.</>} /><RespirationChart nights={data.nights} win={win} respBy={byDay.resp} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="respiration" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Blood oxygen (SpO₂)" tip={<>Each night's <strong>blood-oxygen %</strong> as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. Only the nights the Watch or iPhone logged SpO₂, so it's patchy (ends 2025-10).</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.spo2} color={SPO2} unit="%" label="Blood oxygen (SpO₂)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} H={120} padL={padL} section="respiration" /></div>}
       </div>
 
       <div className={s.block} data-section="heart">
         <div className={s.chartHead}><h3 className={shared.title}>Heart Rate</h3>
-          <InfoTip>Overnight distribution per night — box = middle 50%, whiskers = min–max, tick = median. Lower <strong>sleeping HR</strong> and higher <strong>HRV</strong> indicate better recovery.</InfoTip>
+          <InfoTip>Each night's heart-rate spread as a box-plot (box is the middle 50%, whiskers are min–max, tick is the median). A lower <strong>sleeping HR</strong> and a higher <strong>HRV</strong> both point to better recovery.</InfoTip>
           <Legend items={[
-            { glyph: 'box', color: HR, label: 'Sleeping HR', tip: <>Overnight <strong>heart rate</strong> (bpm). Box = middle 50%, whiskers = min–max, tick = median. Lower is better recovery.</> },
-            { glyph: 'box', color: HRV, label: 'Overnight HRV', tip: <>Overnight <strong>HRV (SDNN, ms)</strong>. Box = middle 50%, whiskers = min–max, tick = median. Higher is better recovery.</> },
+            { glyph: 'box', color: HR, label: 'Sleeping HR', tip: <>Overnight <strong>heart rate</strong> (bpm). Box is the middle 50%, whiskers are min–max, tick is the median. Lower means better recovery.</> },
+            { glyph: 'box', color: HRV, label: 'Overnight HRV', tip: <>Overnight <strong>HRV</strong> (SDNN, ms) — the beat-to-beat variation in your heart rate. Box is the middle 50%, whiskers are min–max, tick is the median. Higher means better recovery.</> },
           ]} /></div>
-        {win && series && <div className={s.subChart}><SubLabel label="Sleeping heart rate" tip={<>Overnight <strong>heart rate</strong> (bpm) per night as box-plots — box = middle 50%, whiskers = min–max, tick = median. A <strong>lower</strong> sleeping HR generally means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hr} color={HR} unit="bpm" label="Sleeping heart rate" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Overnight HRV (SDNN)" tip={<>Overnight <strong>heart-rate variability</strong> (SDNN, ms) per night as box-plots — box = middle 50%, whiskers = min–max, tick = median. <strong>Higher</strong> HRV generally means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hrv} color={HRV} unit="ms" label="Overnight HRV (SDNN)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Sleeping heart rate" tip={<>Each night's <strong>heart rate</strong> (bpm) as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. A <strong>lower</strong> sleeping HR usually means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hr} color={HR} unit="bpm" label="Sleeping heart rate" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Overnight HRV (SDNN)" tip={<>Each night's <strong>heart-rate variability</strong> (SDNN, ms) as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. <strong>Higher</strong> HRV usually means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hrv} color={HRV} unit="ms" label="Overnight HRV (SDNN)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
       </div>
       </div>
 
@@ -594,7 +594,7 @@ export default function Sleep() {
             <div className={s.tipGroupLabel}>timing</div>
             <div className={s.tipRow}><span>bed</span><span>{clock(d.bed)}</span></div>
             <div className={s.tipRow}><span>wake</span><span>{clock(d.wake)}</span></div>
-            {tib > 0 && <div className={s.tipRow}><span>in bed pre/post</span><span>{d.tibBefore}m / {d.tibAfter}m</span></div>}
+            {tib > 0 && <div className={s.tipRow}><span>in bed before/after</span><span>{d.tibBefore}m / {d.tibAfter}m</span></div>}
             <div className={s.tipRow}><span>bed vs target</span><span>{sgn(bedD)}m</span></div>
             <div className={s.tipRow}><span>wake vs target</span><span>{sgn(wakeD)}m</span></div>
             {daylight != null && <div className={s.tipRow}><span>daylight (prev day)</span><span>{hm(daylight)}</span></div>}
@@ -606,7 +606,7 @@ export default function Sleep() {
             {d.resp && <div className={s.tipRow}><span>resp rate</span><span>{d.resp.toFixed(1)} br/min</span></div>}
             <div className={s.tipRow}><span>SpO₂</span><span>{d.spo2 ? `${d.spo2.toFixed(0)}%` : '—'}</span></div>
             {d.dist != null && <div className={s.tipRow}><span>breathing dist.</span><span>{d.dist.toFixed(1)}</span></div>}
-            <div className={s.tipRow}><span>wakes (b/f)</span><span>{d.briefWakes} / {d.wakeCount}</span></div>
+            <div className={s.tipRow}><span>wakes (brief/full)</span><span>{d.briefWakes} / {d.wakeCount}</span></div>
             {d.fullWakeMin > 0 && <div className={s.tipRow}><span>full wake mins</span><span>{hm(d.fullWakeMin)}</span></div>}
           </div>
         );
