@@ -40,3 +40,6 @@ export const saveTelemetry = (workoutId, data) => post(`/api/telemetry/${workout
 export const startHealthIngest = () => post('/api/health/ingest');
 export const getHealthIngestStatus = () => get('/api/health/ingest/status');
 export const getHealthSummary = () => get('/api/health/summary');
+export const getHealthNeat = () => get('/api/health/neat');
+export const getHealthCardio = () => get('/api/health/cardio');
+export const getHealthDay = date => get(`/api/health/day?date=${encodeURIComponent(date)}`);

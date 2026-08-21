@@ -997,6 +997,149 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Full detail for a single day: aggregate metrics, that day's workouts, and
+  // intraday HR + hourly activity — the NEAT day-view modal's data.
+  if (req.method === 'GET' && pathname === '/api/health/day') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 404, { ok: false, error: 'no data' });
+    }
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const date = q.get('date') || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(res, 400, { ok: false, error: 'bad date (YYYY-MM-DD)' });
+    const D = `DATE '${date}'`;
+    duck().then(async con => {
+      await setupViews(con);
+      const one = async sql => (await con.runAndReadAll(sql)).getRowObjectsJson();
+      const [m] = await one(`
+        SELECT max(CASE WHEN metric='StepCount' THEN sum END) AS steps,
+               max(CASE WHEN metric='ActiveEnergyBurned' THEN sum END) AS active_energy,
+               max(CASE WHEN metric='BasalEnergyBurned' THEN sum END) AS basal_energy,
+               max(CASE WHEN metric='FlightsClimbed' THEN sum END) AS flights,
+               max(CASE WHEN metric='AppleExerciseTime' THEN sum END) AS exercise_min,
+               max(CASE WHEN metric='AppleStandTime' THEN sum END) AS stand_min,
+               max(CASE WHEN metric='DistanceWalkingRunning' THEN sum END) AS distance
+        FROM ah_activity_daily WHERE day = ${D}`);
+      const [we] = await one(`
+        SELECT coalesce(sum(s.sum), 0) AS workout_energy
+        FROM ah_workouts w JOIN ah_workout_stats s
+          ON s.workout_idx = w.idx AND s.metric = 'ActiveEnergyBurned'
+        WHERE CAST(w.start_ts AS DATE) = ${D}`);
+      const [wh] = await one(`
+        SELECT count(DISTINCT date_trunc('hour', start_ts)) AS hr_hours, count(*) AS hr_samples
+        FROM ah_records WHERE metric = 'HeartRate' AND CAST(start_ts AS DATE) = ${D}`);
+      const workouts = await one(`
+        SELECT w.idx, w.activity, w.start_ts::VARCHAR AS start, w.duration, w.source,
+               round(hr.avg_hr, 0) AS avg_hr, round(hr.max_hr, 0) AS max_hr
+        FROM ah_workouts w
+        LEFT JOIN (
+          SELECT w.idx, avg(r.value) AS avg_hr, max(r.value) AS max_hr
+          FROM ah_workouts w JOIN ah_records r ON r.metric = 'HeartRate'
+            AND r.start_ts BETWEEN w.start_ts AND w.end_ts
+          WHERE CAST(w.start_ts AS DATE) = ${D} GROUP BY w.idx
+        ) hr ON hr.idx = w.idx
+        WHERE CAST(w.start_ts AS DATE) = ${D} ORDER BY w.start_ts`);
+      const hr = await one(`
+        SELECT CAST(date_diff('minute', date_trunc('day', start_ts), start_ts) AS INT) AS t,
+               round(avg(value)) AS v
+        FROM ah_records WHERE metric = 'HeartRate' AND CAST(start_ts AS DATE) = ${D}
+          AND value >= 30
+        GROUP BY 1 ORDER BY 1`);
+      const hourly = await one(`
+        SELECT hr AS hour,
+               sum(CASE WHEN metric='StepCount' THEN mx END) AS steps,
+               sum(CASE WHEN metric='ActiveEnergyBurned' THEN mx END) AS active
+        FROM (
+          SELECT metric, hr, max(v) AS mx FROM (
+            SELECT metric, CAST(date_part('hour', start_ts) AS INT) AS hr, source, sum(value) AS v
+            FROM ah_records
+            WHERE metric IN ('StepCount','ActiveEnergyBurned') AND CAST(start_ts AS DATE) = ${D}
+            GROUP BY 1, 2, 3
+          ) GROUP BY metric, hr
+        ) GROUP BY hr ORDER BY hr`);
+      const active = Number(m?.active_energy || 0);
+      const workoutEnergy = Number(we?.workout_energy || 0);
+      const metrics = {
+        ...m,
+        workout_energy: workoutEnergy,
+        neat_energy: Math.max(active - workoutEnergy, 0),
+        hr_hours: wh?.hr_hours ?? 0, hr_samples: wh?.hr_samples ?? 0,
+      };
+      json(res, 200, { ok: true, data: { date, metrics, workouts, hr, hourly } });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // NEAT / overall daily activity: one row per day of the whole-body movement
+  // signals, plus neat_energy = daily active energy minus the energy logged to
+  // formal workouts (isolating non-exercise activity thermogenesis).
+  if (req.method === 'GET' && pathname === '/api/health/neat') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: [] });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const rd = await con.runAndReadAll(`
+        WITH day_totals AS (
+          SELECT day,
+                 sum(CASE WHEN metric = 'StepCount' THEN sum END) AS steps,
+                 sum(CASE WHEN metric = 'ActiveEnergyBurned' THEN sum END) AS active_energy,
+                 sum(CASE WHEN metric = 'BasalEnergyBurned' THEN sum END) AS basal_energy,
+                 sum(CASE WHEN metric = 'FlightsClimbed' THEN sum END) AS flights,
+                 sum(CASE WHEN metric = 'AppleExerciseTime' THEN sum END) AS exercise_min,
+                 sum(CASE WHEN metric = 'AppleStandTime' THEN sum END) AS stand_min,
+                 sum(CASE WHEN metric = 'DistanceWalkingRunning' THEN sum END) AS distance
+          FROM ah_activity_daily
+          GROUP BY day
+        ),
+        wkt AS (
+          SELECT CAST(w.start_ts AS DATE) AS day, sum(s.sum) AS workout_energy
+          FROM ah_workouts w
+          JOIN ah_workout_stats s ON s.workout_idx = w.idx AND s.metric = 'ActiveEnergyBurned'
+          GROUP BY 1
+        )
+        SELECT p.day::VARCHAR AS day, p.steps, p.active_energy, p.basal_energy,
+               p.flights, p.exercise_min, p.stand_min, p.distance,
+               coalesce(w.workout_energy, 0) AS workout_energy,
+               greatest(coalesce(p.active_energy, 0) - coalesce(w.workout_energy, 0), 0) AS neat_energy
+        FROM day_totals p LEFT JOIN wkt w USING (day)
+        WHERE p.day IS NOT NULL
+        ORDER BY p.day`);
+      json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Cardiovascular fitness: one row per day of the resting/recovery vitals that
+  // track aerobic fitness over the long run — resting HR, HRV, VO2 max,
+  // respiratory rate, walking HR, blood oxygen. These are periodic scalar
+  // metrics (Apple writes ~one value/day; HRV/RespiratoryRate/SpO2 sample more
+  // often, so average them). SpO2 is stored as a 0–1 fraction → ×100 for %.
+  if (req.method === 'GET' && pathname === '/api/health/cardio') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: [] });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const rd = await con.runAndReadAll(`
+        SELECT CAST(start_ts AS DATE)::VARCHAR AS day,
+               avg(value) FILTER (WHERE metric = 'RestingHeartRate') AS resting_hr,
+               avg(value) FILTER (WHERE metric = 'HeartRateVariabilitySDNN') AS hrv,
+               avg(value) FILTER (WHERE metric = 'VO2Max') AS vo2max,
+               avg(value) FILTER (WHERE metric = 'RespiratoryRate') AS respiratory_rate,
+               avg(value) FILTER (WHERE metric = 'WalkingHeartRateAverage') AS walking_hr,
+               avg(value) FILTER (WHERE metric = 'OxygenSaturation') * 100 AS spo2
+        FROM ah_records
+        WHERE value IS NOT NULL AND metric IN (
+          'RestingHeartRate','HeartRateVariabilitySDNN','VO2Max',
+          'RespiratoryRate','WalkingHeartRateAverage','OxygenSaturation')
+        GROUP BY 1
+        HAVING count(*) > 0
+        ORDER BY 1`);
+      json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/api/telemetry') {
     const dir = path.join(__dirname, 'telemetry');
     const ids = fs.existsSync(dir)

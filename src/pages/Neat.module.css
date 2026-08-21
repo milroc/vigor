@@ -1,0 +1,24 @@
+/* NEAT is a stacked, scrolling analysis page (not viewport-locked like the
+   workout fitness panel). */
+.main { width: 100%; max-width: 1000px; padding: 20px 28px 56px; }
+
+.lead { color: var(--dim); line-height: 1.7; margin: 6px 0 18px; max-width: 640px; }
+.lead strong { color: var(--text); }
+
+.toggles { margin: 4px 0 18px; }
+
+.statBlocks { display: flex; flex-wrap: wrap; gap: 14px 40px; margin-bottom: 8px; }
+.statBlock { flex: 1 1 340px; }
+.statBlockLabel {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--lime); margin-bottom: 6px;
+}
+.statBlockLabel .range { color: var(--dim); text-transform: none; letter-spacing: 0; }
+
+.section { padding: 18px 0; border-top: 1px solid var(--line, #222); }
+.sectionHead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.sectionHead h2 { margin: 0; }
+.sectionHead .sub { color: var(--dim); font-size: 12px; }
+
+.scrub { margin-top: 6px; cursor: ew-resize; }
+.axisRow { display: flex; justify-content: space-between; padding: 2px 10px 0 44px; color: var(--dim); font-size: 10px; }

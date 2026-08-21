@@ -6,6 +6,8 @@ import Sync from './pages/Sync.jsx';
 import Workout from './pages/Workout.jsx';
 import VizLab from './pages/VizLab.jsx';
 import Peloton from './pages/Peloton.jsx';
+import Neat from './pages/Neat.jsx';
+import Cardio from './pages/Cardio.jsx';
 import s from './App.module.css';
 
 export default function App() {
@@ -35,6 +37,8 @@ export default function App() {
           <NavLink to="/sync" className={navClass}>Sync</NavLink>
           <NavLink to="/viz" className={navClass}>Movement Report</NavLink>
           <NavLink to="/peloton" className={navClass}>Peloton</NavLink>
+          <NavLink to="/neat" className={navClass}>NEAT</NavLink>
+          <NavLink to="/cardio" className={navClass}>Cardio</NavLink>
         </nav>
         <div className={s.connBadge}>
           <span className={s.connDot + (connected ? ` ${s.on}` : '')} />
@@ -47,6 +51,8 @@ export default function App() {
         <Route path="/workout/:id" element={<Workout />} />
         <Route path="/viz" element={<VizLab />} />
         <Route path="/peloton" element={<Peloton />} />
+        <Route path="/neat" element={<Neat />} />
+        <Route path="/cardio" element={<Cardio />} />
       </Routes>
     </>
   );
