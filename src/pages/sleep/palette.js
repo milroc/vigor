@@ -1,3 +1,5 @@
+import { notifyPaletteChange } from './canvasLayer.jsx';
+
 // Sleep-tab color palette, shared across the scrubber, skyline, charts, legend,
 // and the color tuner. Each color is a CSS variable (defaults in global.css :root)
 // so the in-tab COLOR TUNER can re-theme every chart at runtime by writing the var
@@ -46,5 +48,6 @@ export function applyTunerState() {
   }
   const m = st.mute || { sat: 1, bri: 1 };
   root.style.setProperty('--comp-mute', `saturate(${m.sat}) brightness(${m.bri})`);
+  notifyPaletteChange();
   return st;
 }

@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { BED_TGT, DEBT, DIST, FULLWAKE, HR, HRV, INBED_POST, INBED_PRE, NAP, RESP, RHR, STAGE, WAKE_TGT } from './palette.js';
 import { CAP_MIN, PAD_L, PAD_R, clamp, clock, labelWidth, niceTicks, pctl, timeTicks, useMeasure } from './helpers.js';
 import { useHoverStore, useHoverTarget } from './hoverStore.jsx';
+import { MarksCanvas, cssColor, fillRect, fillCircle, strokeLine } from './canvasLayer.jsx';
 import s from '../Sleep.module.css';
 
 // ---- The hovered-column band. It used to be a <rect> inside each chart's SVG,
@@ -117,29 +118,28 @@ export const Composition = memo(function Composition({ nights, win, onHover, onO
   const n = view.length, cw = plotW / n;
   const y = v => PAD.t + plotH - (v / CAP_MIN) * plotH;
 
-  const bars = useMemo(() => {
-    if (!w) return null;
+  const drawBars = useMemo(() => g => {
     const bw = Math.max(cw - 0.4, 0.7);
     const order = [['deep', STAGE.deep], ['core', STAGE.core], ['rem', STAGE.rem], ['awake', STAGE.awake], ['tibBefore', INBED_PRE], ['tibAfter', INBED_POST]];
-    return view.map((d, k) => {
+    view.forEach((d, k) => {
       let acc = 0;
-      return order.map(([key, col]) => {
-        const v = d[key] || 0; if (v <= 0) return null;
-        const rect = <rect key={key} x={PAD.l + k * cw} y={y(acc + v)} width={bw} height={y(acc) - y(acc + v)} fill={col} opacity={0.88} />;
-        acc += v; return rect;
-      });
+      for (const [key, col] of order) {
+        const v = d[key] || 0; if (v <= 0) continue;
+        fillRect(g, PAD.l + k * cw, y(acc + v), bw, y(acc) - y(acc + v), col, 0.88);
+        acc += v;
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, w]);
+  }, [view, w, cw, PAD.l]);
 
   const idxAt = e => clamp(lo + Math.floor(((e.clientX - ref.current.getBoundingClientRect().left) / ref.current.getBoundingClientRect().width * w - PAD.l) / cw), lo, hi);
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
 
   return (
     <div ref={ref} className={s.chartWrap}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawBars} filter="var(--comp-mute)" />}
       {w > 0 && (
         <svg className={`${s.svg} ${s.clickable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
-          style={{ filter: 'var(--comp-mute)' }}
           onPointerMove={onMove} onClick={e => onOpen(idxAt(e))}>
           {/* Goal levels replace the axis label at their level (total-sleep in lime, deep
               min/max in the deep color); any regular hour label within 9px is hidden. */}
@@ -157,36 +157,40 @@ export const Composition = memo(function Composition({ nights, win, onHover, onO
               );
             });
           })()}
-          {bars}
-          {/* Deep-sleep goal on the bottom (deep) stacked segment: healthy 13–23% ≈ 60–110 min.
-              The in-chart lines were invisible over the deep bars, so min & max are shown as axis
-              ticks (value + tick, deep color) with a faint zone fill between them. */}
-          {targets?.deepMin > 0 && targets?.deepMax > targets.deepMin && (() => {
-            const yTop = y(Math.min(targets.deepMax, CAP_MIN)), yBot = y(Math.min(targets.deepMin, CAP_MIN));
-            const fmt = v => `${Math.round(v / 60 * 10) / 10}h`;
-            return (
-              <g pointerEvents="none">
-                <rect x={PAD.l} y={yTop} width={w - PAD.l - PAD_R} height={yBot - yTop} fill="var(--st-deep)" opacity={0.15} />
-                {[[targets.deepMin, yBot], [targets.deepMax, yTop]].map(([v, ty], i) => (
-                  <g key={i}>
-                    <line x1={PAD.l} x2={PAD.l + 5} y1={ty} y2={ty} stroke="var(--st-deep)" strokeWidth="1.5" />
-                    <text x={PAD.l - 6} y={ty + 3} fill="var(--st-deep)" fontSize="10" textAnchor="end">{fmt(v)}</text>
-                  </g>
-                ))}
-              </g>
-            );
-          })()}
-          {/* Lime goal line: axis-label value + tick + faint full-width guideline at target minutes. */}
-          {targets?.asleepMin > 0 && targets.asleepMin < CAP_MIN && (() => {
-            const ty = y(targets.asleepMin);
-            return (
-              <g pointerEvents="none">
-                <line x1={PAD.l} x2={w - PAD.r} y1={ty} y2={ty} stroke="var(--lime)" strokeWidth="1" strokeDasharray="4 4" opacity={0.35} />
-                <line x1={PAD.l} x2={PAD.l + 5} y1={ty} y2={ty} stroke="var(--lime)" strokeWidth="1.5" />
-                <text x={PAD.l - 6} y={ty + 3} fill="var(--lime)" fontSize="10" textAnchor="end">{`${Math.round(targets.asleepMin / 60 * 10) / 10}h`}</text>
-              </g>
-            );
-          })()}
+        </svg>
+      )}
+      {/* Goal markers were painted after the bars, so they ride above the canvas. */}
+      {w > 0 && (
+        <svg className={`${s.svg} ${s.goalLayer}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+            {/* Deep-sleep goal on the bottom (deep) stacked segment: healthy 13–23% ≈ 60–110 min.
+                The in-chart lines were invisible over the deep bars, so min & max are shown as axis
+                ticks (value + tick, deep color) with a faint zone fill between them. */}
+            {targets?.deepMin > 0 && targets?.deepMax > targets.deepMin && (() => {
+              const yTop = y(Math.min(targets.deepMax, CAP_MIN)), yBot = y(Math.min(targets.deepMin, CAP_MIN));
+              const fmt = v => `${Math.round(v / 60 * 10) / 10}h`;
+              return (
+                <g pointerEvents="none">
+                  <rect x={PAD.l} y={yTop} width={w - PAD.l - PAD_R} height={yBot - yTop} fill="var(--st-deep)" opacity={0.15} />
+                  {[[targets.deepMin, yBot], [targets.deepMax, yTop]].map(([v, ty], i) => (
+                    <g key={i}>
+                      <line x1={PAD.l} x2={PAD.l + 5} y1={ty} y2={ty} stroke="var(--st-deep)" strokeWidth="1.5" />
+                      <text x={PAD.l - 6} y={ty + 3} fill="var(--st-deep)" fontSize="10" textAnchor="end">{fmt(v)}</text>
+                    </g>
+                  ))}
+                </g>
+              );
+            })()}
+            {/* Lime goal line: axis-label value + tick + faint full-width guideline at target minutes. */}
+            {targets?.asleepMin > 0 && targets.asleepMin < CAP_MIN && (() => {
+              const ty = y(targets.asleepMin);
+              return (
+                <g pointerEvents="none">
+                  <line x1={PAD.l} x2={w - PAD.r} y1={ty} y2={ty} stroke="var(--lime)" strokeWidth="1" strokeDasharray="4 4" opacity={0.35} />
+                  <line x1={PAD.l} x2={PAD.l + 5} y1={ty} y2={ty} stroke="var(--lime)" strokeWidth="1.5" />
+                  <text x={PAD.l - 6} y={ty + 3} fill="var(--lime)" fontSize="10" textAnchor="end">{`${Math.round(targets.asleepMin / 60 * 10) / 10}h`}</text>
+                </g>
+              );
+            })()}
         </svg>
       )}
       <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.13} ready={w > 0} />
@@ -262,32 +266,28 @@ export const Skyline = memo(function Skyline({ nights, win, onHover, onOpen, tar
   }, [view]);
   const y = m => PAD.t + (clamp(m, yMin, yMax) - yMin) / (yMax - yMin) * plotH;
 
-  const rects = useMemo(() => {
-    if (!w) return null;
-    return view.map((d, k) => {
-      if (d.blank) return null;
-      const cx = PAD.l + k * cw, bw = Math.max(cw - 0.4, 0.7);
+  const drawRects = useMemo(() => g => {
+    const bw = Math.max(cw - 0.4, 0.7);
+    view.forEach((d, k) => {
+      if (d.blank) return;
+      const cx = PAD.l + k * cw;
       const tb = d.tibBefore || 0, ta = d.tibAfter || 0;
-      return (
-        <g key={d.day}>
-          <rect x={cx} y={y(d.bed)} width={bw} height={y(d.wake) - y(d.bed)} fill="var(--text)" opacity={0.05} />
-          {tb > 0 && <rect x={cx} y={y(d.bed - tb)} width={bw} height={Math.max(y(d.bed) - y(d.bed - tb), 0.5)} fill={INBED_PRE} opacity={0.4} />}
-          {ta > 0 && <rect x={cx} y={y(d.wake)} width={bw} height={Math.max(y(d.wake + ta) - y(d.wake), 0.5)} fill={INBED_POST} opacity={0.4} />}
-          {d.segs.map((g, j) => (
-            <rect key={j} x={cx} y={y(g.a)} width={bw} height={Math.max(y(g.b) - y(g.a), 0.5)}
-              fill={STAGE[g.st]} opacity={g.st === 'awake' ? 0.9 : 0.8} />
-          ))}
-        </g>
-      );
+      fillRect(g, cx, y(d.bed), bw, y(d.wake) - y(d.bed), 'var(--text)', 0.05);
+      if (tb > 0) fillRect(g, cx, y(d.bed - tb), bw, Math.max(y(d.bed) - y(d.bed - tb), 0.5), INBED_PRE, 0.4);
+      if (ta > 0) fillRect(g, cx, y(d.wake), bw, Math.max(y(d.wake + ta) - y(d.wake), 0.5), INBED_POST, 0.4);
+      for (const seg of d.segs) {
+        fillRect(g, cx, y(seg.a), bw, Math.max(y(seg.b) - y(seg.a), 0.5), STAGE[seg.st], seg.st === 'awake' ? 0.9 : 0.8);
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, w, yMin, yMax]);
+  }, [view, w, yMin, yMax, cw, PAD.l]);
 
   const idxAt = e => clamp(lo + Math.floor(((e.clientX - ref.current.getBoundingClientRect().left) / ref.current.getBoundingClientRect().width * w - PAD.l) / cw), lo, hi);
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
 
   return (
     <div ref={ref} className={`${s.chartWrap} ${fill ? s.skyFill : ''}`}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawRects} />}
       {w > 0 && (
         <svg className={`${s.svg} ${s.clickable}`} width="100%" height={fill ? '100%' : H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           style={fill ? { flex: 1, minHeight: 0 } : undefined}
@@ -325,7 +325,6 @@ export const Skyline = memo(function Skyline({ nights, win, onHover, onOpen, tar
               </>
             );
           })()}
-          {rects}
         </svg>
       )}
       {/* Cubism-style axis: month ticks stay put, but any tick the focused-date
@@ -363,22 +362,26 @@ export const NapsPanel = memo(function NapsPanel({ nights, napDays, win, onHover
   // Sleep debt for EVERY night: 3-night rolling AVERAGE of the nightly deficit
   // under 7h, using effective sleep (brief wake-ups folded in). Memoized so
   // hover doesn't re-render the whole series.
-  const debtBars = useMemo(() => {
-    if (!w) return null;
-    const bwD = Math.max(cw - 0.4, 0.7), out = [];
+  const drawMarks = useMemo(() => g => {
+    // nap length — up (nap-days only)
+    for (const d of days) {
+      fillRect(g, X(d.idx) - bwN / 2, yN(d.napLen), bwN, napBase - yN(d.napLen), NAP, d.recovery ? 0.9 : 0.5);
+    }
+    // sleep debt — down (inverted), every night
+    const bwD = Math.max(cw - 0.4, 0.7);
     for (let i = lo; i <= hi; i++) {
       let sum = 0, cnt = 0;
       for (const j of [i - 2, i - 1, i]) { const a = nights[j]?.asleepEff; if (a != null) { sum += Math.max(0, 420 - a); cnt++; } }
       const debt = cnt ? sum / cnt : 0;
       if (debt <= 0.5) continue;
-      out.push(<rect key={i} x={PAD.l + (i - lo) * cw} y={debtTop} width={bwD} height={yD(debt) - debtTop} fill={DEBT} opacity={0.7} />);
+      fillRect(g, PAD.l + (i - lo) * cw, debtTop, bwD, yD(debt) - debtTop, DEBT, 0.7);
     }
-    return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nights, lo, hi, w]);
+  }, [nights, days, lo, hi, w, cw]);
 
   return (
     <div ref={ref} className={`${s.chartWrap} ${s.napGrid}`}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawMarks} />}
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={onMove} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -388,11 +391,6 @@ export const NapsPanel = memo(function NapsPanel({ nights, napDays, win, onHover
             <g key={h}><line x1={PAD.l} x2={w - PAD.r} y1={yN(h * 60)} y2={yN(h * 60)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={yN(h * 60) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{h}h</text></g>
           ))}
-          {days.map(d => (
-            <rect key={d.idx} x={X(d.idx) - bwN / 2} y={yN(d.napLen)} width={bwN} height={napBase - yN(d.napLen)}
-              fill={NAP} opacity={d.recovery ? 0.9 : 0.5} />
-          ))}
-
           {/* shared central zero line (date labels dropped — see the pinned skyline) */}
           <line x1={PAD.l} x2={w - PAD.r} y1={napBase} y2={napBase} stroke="var(--dim)" opacity={0.6} />
 
@@ -401,7 +399,6 @@ export const NapsPanel = memo(function NapsPanel({ nights, napDays, win, onHover
             <g key={h}><line x1={PAD.l} x2={w - PAD.r} y1={yD(h * 60)} y2={yD(h * 60)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={yD(h * 60) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{h}h</text></g>
           ))}
-          {debtBars}
         </svg>
       )}
       <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={TOP} height={debtBase - TOP} alpha={0.13} ready={w > 0} />
@@ -432,26 +429,22 @@ export const BoxSeries = memo(function BoxSeries({ nights, win, byDay, color, un
   const y = v => PAD.t + plotH - (clamp(v, yMin, yMax) - yMin) / (yMax - yMin) * plotH;
   const bw = Math.max(Math.min(cw * 0.62, 9), 1.2);
 
-  const marks = useMemo(() => {
-    if (!w) return null;
-    return boxes.map(({ k, b }) => {
+  const drawMarks = useMemo(() => g => {
+    for (const { k, b } of boxes) {
       const cx = PAD.l + k * cw + cw / 2;
-      return (
-        <g key={k}>
-          <line x1={cx} x2={cx} y1={y(b.hi)} y2={y(b.lo)} stroke={color} opacity={0.3} />
-          <rect x={cx - bw / 2} y={y(b.q3)} width={bw} height={Math.max(y(b.q1) - y(b.q3), 0.8)} fill={color} opacity={0.32} />
-          <line x1={cx - bw / 2} x2={cx + bw / 2} y1={y(b.med)} y2={y(b.med)} stroke={color} strokeWidth={1.3} />
-        </g>
-      );
-    });
+      strokeLine(g, cx, y(b.hi), cx, y(b.lo), color, 0.3);
+      fillRect(g, cx - bw / 2, y(b.q3), bw, Math.max(y(b.q1) - y(b.q3), 0.8), color, 0.32);
+      strokeLine(g, cx - bw / 2, y(b.med), cx + bw / 2, y(b.med), color, 1, 1.3);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes, w, yMin, yMax]);
+  }, [boxes, w, yMin, yMax, cw, bw, color]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
 
   return (
     <div ref={ref} className={s.chartWrap}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawMarks} />}
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={onMove} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -459,7 +452,6 @@ export const BoxSeries = memo(function BoxSeries({ nights, win, byDay, color, un
             <g key={g}><line x1={PAD.l} x2={w - PAD.r} y1={y(g)} y2={y(g)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={y(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
-          {marks}
           {boxes.length === 0 && <text x={w / 2} y={H / 2} fill="var(--dim)" fontSize="11" textAnchor="middle">no data in this window</text>}
         </svg>
       )}
@@ -499,29 +491,27 @@ export const NextDayCombo = memo(function NextDayCombo({ nights, win, hrvByDay, 
     return vs.length ? [Math.min(...vs), Math.max(...vs)] : [0, 1];
   }, [view, rhrByDay]);
 
-  const marks = useMemo(() => {
-    if (!w) return null;
-    const out = [];
+  const drawMarks = useMemo(() => g => {
     const maxR = Math.min(Math.max(cw * 0.5, 2.5), 6);
     const norm = v => rMax > rMin ? (v - rMin) / (rMax - rMin) : 1;
     view.forEach((d, k) => {
       const v = rhrByDay[d.day];
-      if (v != null) out.push(<circle key={`r${k}`} cx={X(k)} cy={rhrRow} r={Math.max(maxR * Math.sqrt(0.16 + 0.84 * norm(v)), 1)} fill={rhrColor} opacity={0.75} />);
+      if (v != null) fillCircle(g, X(k), rhrRow, Math.max(maxR * Math.sqrt(0.16 + 0.84 * norm(v)), 1), rhrColor, 0.75);
     });
-    boxes.forEach(({ k, b }) => {
+    for (const { k, b } of boxes) {
       const cx = X(k);
-      out.push(<line key={`w${k}`} x1={cx} x2={cx} y1={y(b.hi)} y2={y(b.lo)} stroke={hrvColor} opacity={0.3} />);
-      out.push(<rect key={`b${k}`} x={cx - bw / 2} y={y(b.q3)} width={bw} height={Math.max(y(b.q1) - y(b.q3), 0.8)} fill={hrvColor} opacity={0.32} />);
-      out.push(<line key={`m${k}`} x1={cx - bw / 2} x2={cx + bw / 2} y1={y(b.med)} y2={y(b.med)} stroke={hrvColor} strokeWidth={1.3} />);
-    });
-    return out;
+      strokeLine(g, cx, y(b.hi), cx, y(b.lo), hrvColor, 0.3);
+      fillRect(g, cx - bw / 2, y(b.q3), bw, Math.max(y(b.q1) - y(b.q3), 0.8), hrvColor, 0.32);
+      strokeLine(g, cx - bw / 2, y(b.med), cx + bw / 2, y(b.med), hrvColor, 1, 1.3);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes, view, w, yMin, yMax, rMin, rMax]);
+  }, [boxes, view, w, yMin, yMax, rMin, rMax, cw, bw]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
 
   return (
     <div ref={ref} className={s.chartWrap}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawMarks} />}
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -530,7 +520,6 @@ export const NextDayCombo = memo(function NextDayCombo({ nights, win, hrvByDay, 
               <text x={PAD.l - 6} y={y(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
           <text x={PAD.l - 6} y={rhrRow + 3} fill="var(--dim)" fontSize="8" textAnchor="end">RHR</text>
-          {marks}
           {boxes.length === 0 && <text x={w / 2} y={mTop + plotH / 2} fill="var(--dim)" fontSize="11" textAnchor="middle">no data in this window</text>}
         </svg>
       )}
@@ -566,34 +555,35 @@ export const RespirationChart = memo(function RespirationChart({ nights, win, re
   const X = k => PAD.l + k * cw + cw / 2;
   const bw = Math.max(Math.min(cw * 0.6, 8), 1.2);
 
-  const marks = useMemo(() => {
-    if (!w) return null;
-    const out = [];
+  const drawMarks = useMemo(() => g => {
     // bubbles: area (r ∝ √value) encodes brief-wake count and disturbance level.
     const maxR = Math.min(Math.max(cw * 0.5, 2.5), 6);
-    const wakeMax = Math.max(1, ...view.map(d => d.briefWakes || 0));
-    const distMax = Math.max(1, ...view.map(d => d.dist || 0));
-    const fullMax = Math.max(1, ...view.map(d => d.fullWakeMin || 0));
+    let wakeMax = 1, distMax = 1, fullMax = 1;
+    for (const d of view) {
+      if (d.briefWakes > wakeMax) wakeMax = d.briefWakes;
+      if (d.dist > distMax) distMax = d.dist;
+      if (d.fullWakeMin > fullMax) fullMax = d.fullWakeMin;
+    }
     view.forEach((d, k) => {
       const cx = X(k);
-      if (d.briefWakes > 0) out.push(<circle key={`w${k}`} cx={cx} cy={wakeRow} r={Math.max(maxR * Math.sqrt(d.briefWakes / wakeMax), 1)} fill={STAGE.awake} opacity={0.7} />);
-      if (d.dist > 0) out.push(<circle key={`d${k}`} cx={cx} cy={distRow} r={Math.max(maxR * Math.sqrt(d.dist / distMax), 1)} fill={DIST} opacity={0.8} />);
-      if (d.fullWakeMin > 0) out.push(<circle key={`f${k}`} cx={cx} cy={fullRow} r={Math.max(maxR * Math.sqrt(d.fullWakeMin / fullMax), 1)} fill={FULLWAKE} opacity={0.8} />);
+      if (d.briefWakes > 0) fillCircle(g, cx, wakeRow, Math.max(maxR * Math.sqrt(d.briefWakes / wakeMax), 1), STAGE.awake, 0.7);
+      if (d.dist > 0) fillCircle(g, cx, distRow, Math.max(maxR * Math.sqrt(d.dist / distMax), 1), DIST, 0.8);
+      if (d.fullWakeMin > 0) fillCircle(g, cx, fullRow, Math.max(maxR * Math.sqrt(d.fullWakeMin / fullMax), 1), FULLWAKE, 0.8);
     });
-    boxes.forEach(({ k, b }) => {
+    for (const { k, b } of boxes) {
       const cx = X(k);
-      out.push(<line key={`wk${k}`} x1={cx} x2={cx} y1={yR(b.hi)} y2={yR(b.lo)} stroke={RESP} opacity={0.28} />);
-      out.push(<rect key={`bx${k}`} x={cx - bw / 2} y={yR(b.q3)} width={bw} height={Math.max(yR(b.q1) - yR(b.q3), 0.8)} fill={RESP} opacity={0.3} />);
-      out.push(<line key={`md${k}`} x1={cx - bw / 2} x2={cx + bw / 2} y1={yR(b.med)} y2={yR(b.med)} stroke={RESP} strokeWidth={1.3} />);
-    });
-    return out;
+      strokeLine(g, cx, yR(b.hi), cx, yR(b.lo), RESP, 0.28);
+      fillRect(g, cx - bw / 2, yR(b.q3), bw, Math.max(yR(b.q1) - yR(b.q3), 0.8), RESP, 0.3);
+      strokeLine(g, cx - bw / 2, yR(b.med), cx + bw / 2, yR(b.med), RESP, 1, 1.3);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, boxes, w, rMin, rMax]);
+  }, [view, boxes, w, rMin, rMax, cw, bw]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
 
   return (
     <div ref={ref} className={s.chartWrap}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawMarks} />}
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -604,7 +594,6 @@ export const RespirationChart = memo(function RespirationChart({ nights, win, re
             <g key={g}><line x1={PAD.l} x2={w - PAD.r} y1={yR(g)} y2={yR(g)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={yR(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
-          {marks}
         </svg>
       )}
       <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={4} height={H - 6} alpha={0.12} ready={w > 0} />
@@ -642,27 +631,35 @@ export const Consistency = memo(function Consistency({ nights, win, onHover, onO
   const mid = PAD.t + plotH / 2;
   const y = v => mid - clamp(v, -yMax, yMax) / yMax * (plotH / 2); // 0 = on target, up = later
   const X = i => PAD.l + (i - lo) * cw + cw / 2;
-  const line = key => {
-    let d = '', pen = false;
-    for (let i = lo; i <= hi; i++) { const v = rolling[i][key]; if (v == null) { pen = false; continue; } d += `${pen ? 'L' : 'M'}${X(i)} ${y(v)}`; pen = true; }
-    return d;
-  };
-  const dots = useMemo(() => {
-    if (!w) return null;
-    const r = Math.min(Math.max(cw * 0.28, 0.8), 2.2), out = [];
+  const drawMarks = useMemo(() => g => {
+    const r = Math.min(Math.max(cw * 0.28, 0.8), 2.2);
     for (let i = lo; i <= hi; i++) {
       if (!delta[i]) continue;
-      out.push(<circle key={`b${i}`} cx={X(i)} cy={y(delta[i].bed)} r={r} fill={BED_TGT} opacity={0.5} />);
-      out.push(<circle key={`w${i}`} cx={X(i)} cy={y(delta[i].wake)} r={r} fill={WAKE_TGT} opacity={0.5} />);
+      fillCircle(g, X(i), y(delta[i].bed), r, BED_TGT, 0.5);
+      fillCircle(g, X(i), y(delta[i].wake), r, WAKE_TGT, 0.5);
     }
-    return out;
+    // The 14-night rolling averages, drawn as polylines with gaps where a run
+    // of blank nights leaves no average to plot.
+    for (const [key, col] of [['bed', BED_TGT], ['wake', WAKE_TGT]]) {
+      g.globalAlpha = 1; g.strokeStyle = cssColor(col); g.lineWidth = 1.8;
+      g.beginPath();
+      let pen = false;
+      for (let i = lo; i <= hi; i++) {
+        const v = rolling[i][key];
+        if (v == null) { pen = false; continue; }
+        if (pen) g.lineTo(X(i), y(v)); else g.moveTo(X(i), y(v));
+        pen = true;
+      }
+      g.stroke();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [delta, lo, hi, w]);
+  }, [delta, rolling, lo, hi, w, cw, yMax]);
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
   const gl = g => `${g > 0 ? '+' : ''}${g}`;
 
   return (
     <div ref={ref} className={s.chartWrap}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawMarks} />}
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -672,9 +669,6 @@ export const Consistency = memo(function Consistency({ nights, win, onHover, onO
           ))}
           <line x1={PAD.l} x2={w - PAD.r} y1={mid} y2={mid} stroke="var(--dim)" opacity={0.6} />
           <text x={PAD.l - 6} y={mid + 3} fill="var(--dim)" fontSize="10" textAnchor="end">0</text>
-          {dots}
-          <path d={line('bed')} fill="none" stroke={BED_TGT} strokeWidth={1.8} />
-          <path d={line('wake')} fill="none" stroke={WAKE_TGT} strokeWidth={1.8} />
         </svg>
       )}
       <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.12} ready={w > 0} />
@@ -713,29 +707,33 @@ export const MiniChart = memo(function MiniChart({ nights, win, valueAt, color, 
   const y = v => PAD.t + plotH - (clamp(v, yMin, yMax) - yMin) / (yMax - yMin) * plotH;
   const X = i => PAD.l + (i - lo) * cw + cw / 2;
 
-  const marks = useMemo(() => {
-    if (!w || !pts.length) return null;
+  const drawMarks = useMemo(() => g => {
+    if (!pts.length) return;
     if (type === 'bars') {
       const bw = Math.max(cw - 0.6, 0.8);
-      return pts.map(p => <rect key={p.i} x={PAD.l + (p.i - lo) * cw} y={y(p.v)} width={bw} height={PAD.t + plotH - y(p.v)} fill={color} opacity={0.55} />);
+      for (const p of pts) fillRect(g, PAD.l + (p.i - lo) * cw, y(p.v), bw, PAD.t + plotH - y(p.v), color, 0.55);
+      return;
     }
     if (type === 'bubble') {
       const cy = PAD.t + plotH / 2;
       const maxR = Math.min(Math.max(cw * 0.5, 2.5), 7);
       const norm = v => bvMax > bvMin ? (v - bvMin) / (bvMax - bvMin) : 1;
       // area ∝ value: r = maxR·√(floor + (1-floor)·norm); a floor keeps the smallest bubble visible.
-      return pts.map(p => <circle key={p.i} cx={X(p.i)} cy={cy} r={Math.max(maxR * Math.sqrt(0.16 + 0.84 * norm(p.v)), 1)} fill={color} opacity={0.72} />);
+      for (const p of pts) fillCircle(g, X(p.i), cy, Math.max(maxR * Math.sqrt(0.16 + 0.84 * norm(p.v)), 1), color, 0.72);
+      return;
     }
-    let d = '', pen = false;
-    pts.forEach(p => { d += `${pen ? 'L' : 'M'}${X(p.i)} ${y(p.v)}`; pen = true; });
-    return <path d={d} fill="none" stroke={color} strokeWidth={1.6} />;
+    g.globalAlpha = 1; g.strokeStyle = cssColor(color); g.lineWidth = 1.6;
+    g.beginPath();
+    pts.forEach((p, k) => { if (k) g.lineTo(X(p.i), y(p.v)); else g.moveTo(X(p.i), y(p.v)); });
+    g.stroke();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pts, w, yMin, yMax]);
+  }, [pts, w, yMin, yMax, cw, type, color, bvMin, bvMax]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
 
   return (
     <div ref={ref} className={s.chartWrap}>
+      {w > 0 && <MarksCanvas w={w} h={H} draw={drawMarks} />}
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -746,7 +744,6 @@ export const MiniChart = memo(function MiniChart({ nights, win, valueAt, color, 
           {type === 'bubble' && pts.length > 0 && (
             <text x={PAD.l - 6} y={PAD.t + plotH / 2 + 3} fill="var(--dim)" fontSize="9" textAnchor="end">{bvMin}–{bvMax}</text>
           )}
-          {marks}
           {pts.length === 0 && <text x={w / 2} y={H / 2} fill="var(--dim)" fontSize="11" textAnchor="middle">no data in this window</text>}
         </svg>
       )}
