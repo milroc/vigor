@@ -34,3 +34,13 @@ body::after {
   background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,0.15) 2px 3px);
   z-index: 99;
 }
+
+/* Scrollbars blend into the page instead of rendering as a lighter grey band on
+   the right (the default dark-mode track reads as an overflow seam next to the
+   full-bleed charts). */
+html { scrollbar-color: var(--line) var(--bg); scrollbar-width: thin; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid var(--bg); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #33332c; }
+::-webkit-scrollbar-corner { background: var(--bg); }
