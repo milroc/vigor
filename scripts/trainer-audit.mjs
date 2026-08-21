@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Audit the hand-kept trainer log (manual/trainer-sessions.json) against the
+// Audit the hand-kept trainer log (labels/trainer-sessions.json) against the
 // newest Peloton backup: which sessions are recorded, partial, or missing.
 //
 //   node scripts/trainer-audit.mjs [--user name]
@@ -11,9 +11,9 @@ const USER = args.includes('--user') ? args[args.indexOf('--user') + 1] : null;
 const BAND = { minMins: 42, maxMins: 66 };
 const root = path.join(import.meta.dirname, '..');
 
-const manualFile = path.join(root, 'manual', 'trainer-sessions.json');
+const manualFile = path.join(root, 'labels', 'trainer-sessions.json');
 if (!fs.existsSync(manualFile)) {
-  console.error('missing manual/trainer-sessions.json');
+  console.error('missing labels/trainer-sessions.json');
   process.exit(1);
 }
 const manual = JSON.parse(fs.readFileSync(manualFile, 'utf8'));

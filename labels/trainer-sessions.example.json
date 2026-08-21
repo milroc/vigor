@@ -1,0 +1,12 @@
+{
+  "description": "Copy to labels/trainer-sessions.json and edit. Ground-truth personal-training session dates — authoritative labels for classifying strength workouts. partner=true marks a partner/small-group session.",
+  "note": "Optional free-form note about coverage gaps.",
+  "captions": {
+    "intro": "Optional lead paragraph for the Trainer tab. Use {minMinutes} to interpolate the inferred-session threshold. Falls back to a generic committed blurb if omitted.",
+    "perYear": "Optional subtitle under the 'Sessions per year' chart. Falls back to 'confirmed vs inferred'."
+  },
+  "sessions": [
+    { "date": "2025-06-24", "partner": false },
+    { "date": "2025-06-26", "partner": true }
+  ]
+}

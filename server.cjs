@@ -16,7 +16,9 @@ const VOLTRA_BIN = fs.existsSync(path.join(os.homedir(), '.voltra/bin/voltra'))
 // connection is created lazily (first ingest or query) so the server has no
 // hard dependency on the native binding until the feature is used.
 const { healthState, runHealthIngest, setupViews, STORE } = require('./scripts/ingestHealth.cjs');
+const { computeFitness } = require('./scripts/healthFitness.cjs');
 // Trainer-session reproduction logic lives with its ground-truth labels.
+const { computeTrainerSessions } = require('./labels/trainer-sessions.cjs');
 let _duckCon = null, _duckInit = null;
 function duck() {
   if (_duckCon) return Promise.resolve(_duckCon);
@@ -997,6 +999,65 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Workouts enriched with heart-rate summary (range-joined from HeartRate
+  // samples, since older exports carry no WorkoutStatistics).
+  if (req.method === 'GET' && pathname === '/api/health/workouts') {
+    if (!fs.existsSync(path.join(STORE, 'workouts.parquet'))) {
+      return json(res, 200, { ok: true, data: [] });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const rd = await con.runAndReadAll(`
+        WITH stats AS (
+          -- This export carries workout totals as WorkoutStatistics children,
+          -- not Workout attributes, so distance/energy come from here.
+          SELECT workout_idx,
+                 max(CASE WHEN metric IN ('DistanceWalkingRunning','DistanceCycling','DistanceSwimming')
+                          THEN sum END) AS dist,
+                 max(CASE WHEN metric IN ('DistanceWalkingRunning','DistanceCycling','DistanceSwimming')
+                          THEN unit END) AS dist_unit,
+                 max(CASE WHEN metric = 'ActiveEnergyBurned' THEN sum END) AS energy,
+                 max(CASE WHEN metric = 'ActiveEnergyBurned' THEN unit END) AS energy_unit
+          FROM ah_workout_stats GROUP BY workout_idx
+        ),
+        steps AS (
+          -- Steps aren't a workout stat; sum the StepCount stream in-window.
+          -- Dedup concurrent iPhone + Watch by taking the fullest source per
+          -- hour (same approach as ah_activity_daily), else they double-count.
+          SELECT idx, sum(hr_val) AS steps FROM (
+            SELECT idx, hr, max(v) AS hr_val FROM (
+              SELECT w.idx AS idx, date_trunc('hour', r.start_ts) AS hr, r.source, sum(r.value) AS v
+              FROM ah_workouts w
+              JOIN ah_records r ON r.metric = 'StepCount'
+                AND r.start_ts BETWEEN w.start_ts AND w.end_ts
+              GROUP BY 1, 2, 3
+            ) GROUP BY idx, hr
+          ) GROUP BY idx
+        )
+        SELECT w.idx, w.activity, w.duration, w.duration_unit,
+               coalesce(w.distance, st.dist) AS distance,
+               coalesce(w.distance_unit::VARCHAR, st.dist_unit) AS distance_unit,
+               coalesce(w.energy, st.energy) AS energy,
+               coalesce(w.energy_unit::VARCHAR, st.energy_unit) AS energy_unit,
+               w.source, w.start_ts::VARCHAR AS start, w.end_ts::VARCHAR AS "end",
+               round(hr.avg_hr, 0) AS avg_hr, round(hr.max_hr, 0) AS max_hr, hr.hr_samples,
+               round(steps.steps, 0) AS steps
+        FROM ah_workouts w
+        LEFT JOIN stats st ON st.workout_idx = w.idx
+        LEFT JOIN steps ON steps.idx = w.idx
+        LEFT JOIN (
+          SELECT w.idx, avg(r.value) AS avg_hr, max(r.value) AS max_hr, count(*) AS hr_samples
+          FROM ah_workouts w
+          JOIN ah_records r ON r.metric = 'HeartRate'
+            AND r.start_ts BETWEEN w.start_ts AND w.end_ts
+          GROUP BY w.idx
+        ) hr ON hr.idx = w.idx
+        ORDER BY w.start_ts DESC`);
+      json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
   // Full detail for a single day: aggregate metrics, that day's workouts, and
   // intraday HR + hourly activity — the NEAT day-view modal's data.
   if (req.method === 'GET' && pathname === '/api/health/day') {
@@ -1069,6 +1130,27 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Apple Watch wear proxy: the Watch is the only all-day heart-rate source, so
+  // the number of distinct clock-hours with a HR sample approximates hours worn
+  // that day (0-24). Days with no HR ≈ Watch not worn.
+  if (req.method === 'GET' && pathname === '/api/health/watch-wear') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: [] });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const rd = await con.runAndReadAll(`
+        SELECT CAST(start_ts AS DATE)::VARCHAR AS "day",
+               count(DISTINCT date_trunc('hour', start_ts)) AS hr_hours,
+               count(*) AS hr_samples
+        FROM ah_records
+        WHERE metric = 'HeartRate'
+        GROUP BY 1 ORDER BY 1`);
+      json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
   // NEAT / overall daily activity: one row per day of the whole-body movement
   // signals, plus neat_energy = daily active energy minus the energy logged to
   // formal workouts (isolating non-exercise activity thermogenesis).
@@ -1135,6 +1217,77 @@ const server = http.createServer((req, res) => {
         GROUP BY 1
         HAVING count(*) > 0
         ORDER BY 1`);
+      json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Per-ride cardio fitness analysis (EF, decoupling, VO2, TRIMP, zones),
+  // same shape as /api/peloton/fitness so FitnessPanel renders it.
+  // ?activity=<Name>&weightLbs=<n>.
+  if (req.method === 'GET' && pathname === '/api/health/fitness') {
+    if (!fs.existsSync(path.join(STORE, 'workouts.parquet'))) {
+      return json(res, 200, { ok: true, data: { rides: [], hrMax: null, workloadKey: null } });
+    }
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const activity = q.get('activity') || '';
+    const weightLbs = q.get('weightLbs') || '';
+    const idxsRaw = q.get('idxs') || '';
+    if (idxsRaw && !/^\d+(,\d+)*$/.test(idxsRaw)) return json(res, 400, { ok: false, error: 'bad idxs' });
+    const idxs = idxsRaw ? idxsRaw.split(',').map(Number) : undefined;
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await computeFitness(con, { activity, weightLbs, idxs });
+      json(res, 200, { ok: true, data });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Personal-training session roll-up: reconciles Apple strength/"Other"
+  // workouts with the hand-labeled ground truth (labels/trainer-sessions.json)
+  // into one classified session per day (confirmed / inferred / label-only).
+  if (req.method === 'GET' && pathname === '/api/health/trainer') {
+    if (!fs.existsSync(path.join(STORE, 'workouts.parquet'))) {
+      return json(res, 200, { ok: true, data: { sessions: [], summary: null } });
+    }
+    let labels = [], captions = {};
+    const file = path.join(__dirname, 'labels', 'trainer-sessions.json');
+    if (fs.existsSync(file)) {
+      try {
+        const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+        labels = m.sessions || [];
+        // Personal narrative (era references, "the gap is when you had no
+        // trainer") lives in the manual file, not committed source.
+        captions = m.captions || {};
+      } catch { return json(res, 500, { ok: false, error: 'labels/trainer-sessions.json is corrupt' }); }
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await computeTrainerSessions(con, { labels });
+      json(res, 200, { ok: true, data: { ...data, captions } });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Per-workout time series for one metric (default HeartRate), as second
+  // offsets from workout start. ?idx=<int>&metric=<Name>.
+  if (req.method === 'GET' && pathname === '/api/health/workout/series') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const idx = Number(q.get('idx'));
+    const metric = q.get('metric') || 'HeartRate';
+    if (!Number.isInteger(idx) || idx < 0) return json(res, 400, { ok: false, error: 'bad idx' });
+    if (!/^[A-Za-z]+$/.test(metric)) return json(res, 400, { ok: false, error: 'bad metric' });
+    duck().then(async con => {
+      await setupViews(con);
+      const rd = await con.runAndReadAll(`
+        WITH w AS (SELECT start_ts, end_ts FROM ah_workouts WHERE idx = ${idx})
+        SELECT CAST(date_diff('second', (SELECT start_ts FROM w), r.start_ts) AS INT) AS second,
+               r.value AS v
+        FROM ah_records r, w
+        WHERE r.metric = '${metric}'
+          AND r.start_ts BETWEEN w.start_ts AND w.end_ts
+          AND r.value IS NOT NULL
+        ORDER BY r.start_ts`);
       json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
     }).catch(e => json(res, 500, { ok: false, error: e.message }));
     return;

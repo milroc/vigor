@@ -21,7 +21,6 @@ export const startBackup = () => post('/api/backup');
 export const getBackupStatus = () => get('/api/backup/status');
 export const startPelotonBackup = () => post('/api/backup/peloton');
 export const getPelotonBackupStatus = () => get('/api/backup/peloton/status');
-export const getProfile = () => get('/api/profile');
 export const getPelotonWorkouts = () => get('/api/peloton/workouts');
 export const getPelotonFitness = (dir, params) => {
   const q = new URLSearchParams({ dir });
@@ -43,3 +42,16 @@ export const getHealthSummary = () => get('/api/health/summary');
 export const getHealthNeat = () => get('/api/health/neat');
 export const getHealthCardio = () => get('/api/health/cardio');
 export const getHealthDay = date => get(`/api/health/day?date=${encodeURIComponent(date)}`);
+export const getHealthWorkouts = () => get('/api/health/workouts');
+export const getHealthWatchWear = () => get('/api/health/watch-wear');
+export const getHealthFitness = ({ activity, weightLbs, idxs } = {}) => {
+  const p = new URLSearchParams();
+  if (activity) p.set('activity', activity);
+  if (weightLbs) p.set('weightLbs', weightLbs);
+  if (idxs && idxs.length) p.set('idxs', idxs.join(','));
+  return get(`/api/health/fitness?${p}`);
+};
+export const getHealthTrainer = () => get('/api/health/trainer');
+export const getHealthWorkoutSeries = (idx, metric = 'HeartRate') =>
+  get(`/api/health/workout/series?idx=${idx}&metric=${encodeURIComponent(metric)}`);
+export const getProfile = () => get('/api/profile');

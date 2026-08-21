@@ -10,6 +10,7 @@ store/
 # reproduction logic (*.cjs) and schema examples (*.example.json) are committed.
 labels/*
 !labels/*.example.json
+!labels/*.cjs
 telemetry/
 targets.json
 
