@@ -14,6 +14,10 @@ import { Legend, SubLabel } from './sleep/Legend.jsx';
 import { Navigator, Composition, Skyline, NapsPanel, BoxSeries, NextDayCombo, RespirationChart, Consistency, MiniChart, Stat } from './sleep/charts.jsx';
 import { NightModal } from './sleep/NightModal.jsx';
 
+// Format ISO day strings for copy (slice, no Date() → no timezone drift).
+const ym = d => d && d.slice(0, 7);                     // "2023-09"
+const yrRange = (a, b) => !a ? null : a.slice(0, 4) === b.slice(0, 4) ? a.slice(0, 4) : `${a.slice(0, 4)}–${b.slice(2, 4)}`;
+
 export default function Sleep() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -103,6 +107,24 @@ export default function Sleep() {
     }); return m;
   }, [data, byDay]);
   const targets = { deepMin: 60, deepMax: 110, ...(data?.targets || { asleepMin: 420, bedMin: 420, wakeMin: 840, asleepHours: 7, bedtime: '01:00', wake: '08:00' }) };
+
+  // Per-metric coverage windows, computed from the data so copy never hardcodes
+  // dates (each Watch metric came online at a different time).
+  const coverage = useMemo(() => {
+    if (!data?.nights?.length) return null;
+    const N = data.nights;
+    const span = pred => { const ds = N.filter(pred).map(n => n.day); return ds.length ? [ds[0], ds[ds.length - 1]] : null; };
+    const inbed = span(n => n.tibBefore != null || n.tibAfter != null);
+    const dist = span(n => n.dist != null);
+    const dl = series?.daylight || [], sp = series?.spo2 || [];
+    return {
+      startYear: N[0].day.slice(0, 4),
+      inbed: inbed && yrRange(inbed[0], inbed[1]),
+      distStart: dist && ym(dist[0]),
+      daylightStart: dl.length ? ym(dl[0].day) : null,
+      spo2End: sp.length ? ym(sp[sp.length - 1].night) : null,
+    };
+  }, [data, series]);
 
   // Size the shared left gutter to the widest y-axis label that appears across the
   // aligned date charts (measured from the whole dataset), so every chart lines up
@@ -383,7 +405,7 @@ export default function Sleep() {
     return (
       <main className={s.main}>
         <div className={s.headRow}><h2 className={shared.title}>Sleep</h2></div>
-        <p className={s.intro}>No sleep data yet. Import an <strong>export.zip</strong> from the <strong>Sync</strong> tab to load it. Stage data starts in late 2021, whenever the Apple Watch was worn overnight.</p>
+        <p className={s.intro}>No sleep data yet. Import an <strong>export.zip</strong> from the <strong>Sync</strong> tab to load it. Stage data goes back to whenever the Apple Watch was first worn overnight.</p>
       </main>
     );
   }
@@ -397,7 +419,7 @@ export default function Sleep() {
             <div className={s.titleRow}>
               <h2 className={shared.title}>Sleep</h2>
               <InfoTip wide forceOpen={nux} onDismiss={dismissNux}>
-                <strong>Welcome to Sleep.</strong> Every night since 2021, recorded by the Apple Watch and shown in <strong>local time</strong> (so travel doesn't skew it). Set a range at the top right, or drag the edges of the <strong>date selector</strong>. Hover any chart to inspect a single night; all the panels move together.
+                <strong>Welcome to Sleep.</strong> Every night since {coverage.startYear}, recorded by the Apple Watch and shown in <strong>local time</strong> (so travel doesn't skew it). Set a range at the top right, or drag the edges of the <strong>date selector</strong>. Hover any chart to inspect a single night; all the panels move together.
               </InfoTip>
             </div>
             {summary && (
@@ -476,8 +498,8 @@ export default function Sleep() {
             { glyph: 'square', color: STAGE.core, label: 'Core', tip: <>Minutes of <strong>Core</strong> (light) sleep in the stack.</> },
             { glyph: 'square', color: STAGE.rem, label: 'REM', tip: <>Minutes of <strong>REM</strong> sleep in the stack.</> },
             { glyph: 'square', color: STAGE.awake, label: 'Awake', tip: <>Minutes spent <strong>awake</strong>, at the top of the stack.</> },
-            { glyph: 'square', color: INBED_PRE, label: 'In bed · pre', tip: <>Time in bed <strong>before</strong> you fell asleep (2021–24). Faded cap below the stack.</> },
-            { glyph: 'square', color: INBED_POST, label: 'In bed · post', tip: <>Time in bed <strong>after</strong> you woke (2021–24). Faded cap above the stack.</> },
+            { glyph: 'square', color: INBED_PRE, label: 'In bed · pre', tip: <>Time in bed <strong>before</strong> you fell asleep{coverage.inbed ? ` (${coverage.inbed})` : ''}. Faded cap below the stack.</> },
+            { glyph: 'square', color: INBED_POST, label: 'In bed · post', tip: <>Time in bed <strong>after</strong> you woke{coverage.inbed ? ` (${coverage.inbed})` : ''}. Faded cap above the stack.</> },
           ]} /></div>
         {win && <Composition nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="stages" />}
       </div>
@@ -491,7 +513,7 @@ export default function Sleep() {
             { glyph: 'bar', color: DAYLIGHT, label: 'Daylight (prev day)', tip: <><strong>Time in daylight</strong> (min) the day <strong>before</strong> this night, which feeds into your body clock and bedtime. Watch-only, so a low bar can also mean the Watch was off your wrist.</> },
           ]} /></div>
         {win && <Consistency nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="consistency" />}
-        {win && series && <div className={s.subChart}><SubLabel label="Time in daylight (previous day)" tip={<><strong>Time in daylight</strong> (min) racked up the day <strong>before</strong> each night, so it lines up as the daytime that leads into that evening's bedtime. Watch-only (from 2023-09); a low bar can mean little daylight <strong>or</strong> that the Watch was off.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => daylightByDay[data.nights[i].day] ?? null} color={DAYLIGHT} unit="min" label="Time in daylight (previous day)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="consistency" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Time in daylight (previous day)" tip={<><strong>Time in daylight</strong> (min) racked up the day <strong>before</strong> each night, so it lines up as the daytime that leads into that evening's bedtime. Watch-only{coverage.daylightStart ? ` (from ${coverage.daylightStart})` : ''}; a low bar can mean little daylight <strong>or</strong> that the Watch was off.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => daylightByDay[data.nights[i].day] ?? null} color={DAYLIGHT} unit="min" label="Time in daylight (previous day)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="consistency" /></div>}
       </div>
 
       <div className={s.block} data-section="recovery">
@@ -514,13 +536,13 @@ export default function Sleep() {
           <InfoTip>Each night's <strong>breathing rate</strong> as a box-plot (box is the middle 50%, whiskers are min–max). The lanes underneath size their <strong>bubbles</strong> by count: <strong>breathing disturbances</strong> (coral), <strong>brief wake-ups under 10 min</strong> (orange), and <strong>time awake in stretches of 10 min or more</strong> (red). <strong>SpO₂</strong> gets its own box-plot below.</InfoTip>
           <Legend items={[
             { glyph: 'box', color: RESP, label: 'Resp rate', tip: <>Overnight <strong>breathing rate</strong> (breaths/min). Box is the middle 50%, whiskers are min–max, tick is the median.</> },
-            { glyph: 'bubble', color: DIST, label: 'Disturbances', tip: <><strong>Breathing disturbances</strong> flagged that night. Bigger bubble means more (from 2025-10).</> },
+            { glyph: 'bubble', color: DIST, label: 'Disturbances', tip: <><strong>Breathing disturbances</strong> flagged that night. Bigger bubble means more{coverage.distStart ? ` (from ${coverage.distStart})` : ''}.</> },
             { glyph: 'bubble', color: STAGE.awake, label: 'Brief wake-ups', tip: <>Wake-ups <strong>under 10 min</strong>. Bigger bubble means more of them.</> },
             { glyph: 'bubble', color: FULLWAKE, label: 'Full wake mins', tip: <>Total minutes awake in stretches of <strong>10 min or more</strong>. Bigger bubble means more time awake.</> },
             { glyph: 'box', color: SPO2, label: 'SpO₂', tip: <>Overnight <strong>blood-oxygen %</strong>. Box is the middle 50%, whiskers are min–max, tick is the median.</> },
           ]} /></div>
         {win && series && <div className={s.subChart}><SubLabel label="Respiratory rate" tip={<>Each night's <strong>breathing rate</strong> (breaths/min) as a box-plot — <strong>box</strong> is the middle 50%, <strong>whiskers</strong> are min–max, <strong>tick</strong> is the median. The lanes below size their <strong>bubbles</strong> by breathing disturbances, brief wake-ups under 10 min, and total minutes awake in longer stretches.</>} /><RespirationChart nights={data.nights} win={win} respBy={byDay.resp} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="respiration" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Blood oxygen (SpO₂)" tip={<>Each night's <strong>blood-oxygen %</strong> as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. Only the nights the Watch or iPhone logged SpO₂, so it's patchy (ends 2025-10).</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.spo2} color={SPO2} unit="%" label="Blood oxygen (SpO₂)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} H={120} padL={padL} section="respiration" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Blood oxygen (SpO₂)" tip={<>Each night's <strong>blood-oxygen %</strong> as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. Only the nights the Watch or iPhone logged SpO₂, so it's patchy{coverage.spo2End ? ` (ends ${coverage.spo2End})` : ''}.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.spo2} color={SPO2} unit="%" label="Blood oxygen (SpO₂)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} H={120} padL={padL} section="respiration" /></div>}
       </div>
 
       <div className={s.block} data-section="heart">
