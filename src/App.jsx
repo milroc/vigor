@@ -9,6 +9,7 @@ import Peloton from './pages/Peloton.jsx';
 import Health from './pages/Health.jsx';
 import Neat from './pages/Neat.jsx';
 import Cardio from './pages/Cardio.jsx';
+import Sleep from './pages/Sleep.jsx';
 import s from './App.module.css';
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
           <NavLink to="/health" className={navClass}>Apple Health</NavLink>
           <NavLink to="/neat" className={navClass}>NEAT</NavLink>
           <NavLink to="/cardio" className={navClass}>Cardio</NavLink>
+          <NavLink to="/sleep" className={navClass}>Sleep</NavLink>
         </nav>
         <div className={s.connBadge}>
           <span className={s.connDot + (connected ? ` ${s.on}` : '')} />
@@ -56,6 +58,7 @@ export default function App() {
         <Route path="/health" element={<Health />} />
         <Route path="/neat" element={<Neat />} />
         <Route path="/cardio" element={<Cardio />} />
+        <Route path="/sleep" element={<Sleep />} />
       </Routes>
     </>
   );

@@ -1,0 +1,557 @@
+/* Single scroll container: the whole page scrolls, and the top context (Sleep
+   header + timing skyline) is position:sticky so it stays on screen. Because
+   there's one scrollbar shared by everything, every chart has the exact same
+   content width — so every date lands at the same x across all charts. */
+.main { flex: 1; min-height: 0; width: 100%; padding: 0 28px; display: block; overflow-y: auto; overflow-x: hidden; }
+
+.pinned {
+  position: sticky; top: 0; z-index: 5;
+  /* Content-driven height: header + the bounded skyline. The skyline height
+     comes from .skyFill's own clamp (below), NOT from leftover flex space, so
+     there's no measurement feedback loop that can make it balloon on resize. */
+  padding-top: 18px; background: var(--bg);
+  display: flex; flex-direction: column; overflow: hidden;
+  /* Persistent divider between the sticky header/skyline and the scrolling
+     charts — content tucks under this fixed line as you scroll. */
+  border-bottom: 1px solid var(--line);
+}
+.pinned .headRow { margin-bottom: 10px; padding-bottom: 10px; }
+.skyBlock { display: flex; flex-direction: column; padding-top: 10px; }
+/* The skyline is a .block but sits inside .pinned, which owns the bottom
+   divider — so drop its own border (higher specificity than .block) to avoid a
+   doubled line. */
+.pinned .skyBlock { border-bottom: none; }
+.skyBlock .chartHead { margin-bottom: 6px; }
+/* Explicit, bounded, responsive height (NOT flex-grow) so the fill-mode Skyline
+   measures a stable box: it can't collapse to a sliver (min 120px) and can't
+   balloon on resize (max 240px). This is the element useMeasure observes. */
+.skyFill { height: clamp(120px, 18vh, 240px); display: flex; flex-direction: column; }
+.scroller { padding-bottom: 44px; }
+.error { color: var(--red); padding: 16px 0; }
+
+/* Header: title + stats on the left, date picker + units + chips on the right.
+   Stays ONE row down to small laptop widths — nowrap + min-width:0 lets the stats
+   shrink first, and progressive disclosure (below) trims the least-critical stats
+   before the row is ever allowed to wrap. The brush lives in the picker popover. */
+.headRow {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  flex-wrap: nowrap; gap: 16px 24px; min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px; margin-bottom: 16px;
+}
+.headMain { display: flex; align-items: center; gap: 14px 26px; flex-wrap: wrap; min-width: 0; }
+.titleRow { display: flex; align-items: center; gap: 9px; }
+.titleRow h2 { margin-bottom: 0; font-size: 21px; letter-spacing: 2.5px; }
+.headSel { display: flex; flex-direction: row; align-items: center; gap: 10px; flex: 0 0 auto; }
+.navWrap { width: 230px; }
+/* Progressive disclosure: trim the least-critical stats so the header never wraps. */
+@media (max-width: 1120px) {
+  .stats > div:nth-child(n+5) { display: none; }
+  .headMain { gap: 12px 18px; }
+}
+.intro { color: var(--dim); line-height: 1.7; margin: 0 0 16px; max-width: 720px; }
+.intro strong { color: var(--text); }
+
+/* Info affordance: an "i" by a title that reveals a description on hover; also
+   the first-load NUX popover (forced open, with a dismiss button). */
+.info { position: relative; display: inline-flex; }
+.infoIcon {
+  width: 17px; height: 17px; border: 1px solid var(--dim); border-radius: 50%;
+  color: var(--dim); font-size: 11px; font-weight: 600; cursor: help;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: 'IBM Plex Mono', monospace; line-height: 1;
+}
+.info:hover .infoIcon { border-color: var(--lime); color: var(--lime); }
+.infoPop {
+  position: absolute; top: calc(100% + 9px); left: -4px; z-index: 40;
+  width: 266px; background: var(--panel);
+  border: 1px solid var(--line); border-top: 2px solid var(--lime);
+  padding: 12px 14px; font-size: 11px; line-height: 1.7; font-weight: 400;
+  color: rgba(232, 232, 224, 0.82);
+  font-family: 'IBM Plex Mono', monospace; text-transform: none; letter-spacing: 0;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+.infoPop::before {
+  content: ''; position: absolute; top: -6px; left: 14px;
+  width: 9px; height: 9px; background: var(--panel);
+  border-top: 2px solid var(--lime); border-left: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+.infoPop strong { color: var(--lime); font-weight: 600; }
+.infoPopWide { width: 350px; }
+.nuxBtn {
+  display: block; margin-top: 10px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  background: var(--lime); color: var(--bg); border: none;
+  padding: 7px 12px; cursor: pointer;
+}
+.nuxBtn:hover { filter: brightness(1.08); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--line);
+  height: 44px; padding: 0 14px; cursor: pointer;
+  display: inline-flex; align-items: center;
+  transition: border-color 0.15s, color 0.15s;
+}
+.chip:hover { border-color: var(--lime); color: var(--lime); }
+.chipActive { border-color: var(--lime); color: var(--lime); }
+
+/* Date stepper by the range selector (and in the day modal) — clickable ‹ ›
+   arrows around a text readout of the focused date / window range. Hovering it
+   reveals a tooltip (reusing .infoPop) about the ← → arrow keys; the arrows grey
+   out and disable at the data / window boundary. */
+.stepper {
+  position: relative; display: inline-flex; align-items: center; gap: 2px;
+  height: 44px; padding: 0 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel);
+  font-family: 'IBM Plex Mono', monospace;
+  transition: border-color 0.12s;
+}
+.stepper:hover { border-color: var(--lime); }
+.stepArrow {
+  background: none; border: none; cursor: pointer;
+  color: var(--dim); font-size: 18px; line-height: 1;
+  padding: 0 6px; font-family: 'IBM Plex Mono', monospace;
+  transition: color 0.12s;
+}
+.stepArrow:hover:not(:disabled) { color: var(--lime); }
+.stepArrow:disabled { color: var(--line); cursor: default; }
+.stepDate {
+  color: var(--lime); font-size: 11px; letter-spacing: 0.5px;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.stepNoData { color: var(--dim); }
+/* The date readout becomes a button when it opens the range picker. */
+.stepDateBtn {
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+  color: var(--lime); font-size: 11px; letter-spacing: 0.5px;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+  font-family: 'IBM Plex Mono', monospace;
+  border-bottom: 1px dotted transparent; transition: border-color 0.12s;
+}
+.stepDateBtn:hover { border-bottom-color: var(--lime); }
+
+/* Self-contained range-calendar popover, anchored under the date stepper. Two
+   columns: a preset list (rolling windows + calendar-unit snaps) on the left, a
+   two-month grid + embedded brush on the right. */
+.stepWrap { position: relative; display: inline-flex; }
+/* position:fixed + inline top/left (measured from the trigger's
+   getBoundingClientRect on open + resize) so the tall two-month popover escapes
+   .pinned's overflow:hidden and .main's overflow-x:hidden instead of being clipped. */
+.pickPop {
+  position: fixed; z-index: 50;
+  background: var(--panel); border: 1px solid var(--line); border-top: 2px solid var(--lime);
+  padding: 14px 16px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.pickCols { display: flex; gap: 16px; }
+.pickPresets {
+  display: flex; flex-direction: column; gap: 4px;
+  border-right: 1px solid var(--line); padding-right: 14px; min-width: 92px;
+}
+.presetBtn {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 1px; text-align: left;
+  background: none; border: 1px solid transparent; color: var(--dim);
+  padding: 5px 8px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.presetBtn:hover { color: var(--lime); border-color: var(--line); }
+.presetOn { color: var(--bg); background: var(--lime); border-color: var(--lime); }
+.pickMain { display: flex; flex-direction: column; }
+/* Quick-select row inside the popover: the W/M/YR + 7D/30D/1YR segmented unit
+   control and the 90d/All range chips, moved here from the top bar. */
+.pickQuick {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  padding-bottom: 12px; margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+/* In-popover variant of the segmented unit control: one shared 1px frame with
+   clean 1px internal dividers (no doubled borders), uniform 30px cells, and the
+   active cell only changing fill/color — never its box size. */
+.pickQuick .units { height: 30px; border: 1px solid var(--line); }
+.pickQuick .unit {
+  height: 100%; min-width: 34px; padding: 0 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-right: 1px solid var(--line);
+  box-sizing: border-box; letter-spacing: 0.5px;
+}
+.pickQuick .unit:last-child { border-right: none; }
+.pickQuick .unitSep { width: 1px; }
+/* Range chips share the units' height and read as part of the same row. */
+.pickQuick .chips { gap: 6px; }
+.pickQuick .chip {
+  height: 30px; padding: 0 12px; letter-spacing: 0.5px;
+}
+.calNav { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.calArrow {
+  background: none; border: 1px solid var(--line); color: var(--dim);
+  font-size: 15px; line-height: 1; padding: 2px 10px; cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace; transition: color 0.12s, border-color 0.12s;
+}
+.calArrow:hover:not(:disabled) { color: var(--lime); border-color: var(--lime); }
+.calArrow:disabled { color: var(--line); cursor: default; }
+.calMonths { display: flex; gap: 18px; }
+.calMonth { width: 168px; }
+.calCaption {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--text); text-align: center; margin-bottom: 6px;
+}
+.calDow, .calGrid { display: grid; grid-template-columns: repeat(7, 1fr); }
+.calDow { margin-bottom: 3px; }
+.calDow span {
+  text-align: center; font-size: 9px; color: var(--dim);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.calGrid { gap: 1px; }
+.calPad { height: 22px; }
+.calDay {
+  height: 22px; background: none; border: none; cursor: pointer;
+  color: var(--text); font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; font-variant-numeric: tabular-nums;
+  transition: background 0.1s, color 0.1s;
+}
+.calDay:hover:not(:disabled) { background: rgba(198, 254, 40, 0.18); color: var(--lime); }
+.calDayDis { color: var(--line); cursor: default; }
+.calDayIn { background: rgba(198, 254, 40, 0.14); }
+.calDayEnd { background: var(--lime); color: var(--bg); font-weight: 700; }
+.pickHint { font-size: 9px; color: var(--dim); margin: 8px 0 0; line-height: 1.6; }
+.pickHint strong { color: var(--lime); font-weight: 600; }
+.pickBrush { margin-top: 10px; }
+.pickBrush .navWrap { width: 100%; }
+
+/* Nav-unit segmented control: calendar-aligned W/M/YR + rolling 7D/30D/1YR,
+   separated by a rule. The ‹ › arrows and ← → keys step by the active unit. */
+.units { display: inline-flex; border: 1px solid var(--line); }
+.unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  background: var(--panel); color: var(--dim); border: none; border-right: 1px solid var(--line);
+  height: 44px; padding: 0 10px; cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.unit:last-child { border-right: none; }
+.unit:hover { color: var(--lime); }
+.unitActive { color: var(--bg); background: var(--lime); }
+.unitSep { width: 2px; background: var(--line); align-self: stretch; }
+
+/* Sub-chart caption: names a stacked chart within a section; hover explains it. */
+.subChart { position: relative; }
+.subLabel {
+  position: relative; display: inline-flex;
+  color: var(--dim); font-size: 10px; margin: 0 0 3px;
+  cursor: help; transition: color 0.12s;
+}
+.subLabel:hover { color: var(--text); }
+
+/* Stat tiles — identical to Peloton/Health. */
+.stats { display: flex; flex-wrap: wrap; gap: 18px 22px; margin: 0; }
+.statValue { font-size: 20px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.statValue small { font-size: 11px; color: var(--dim); font-weight: 400; }
+.statLabel { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--dim); margin-top: 2px; }
+
+/* Stat hierarchy — hero row, then secondary/tertiary tiers separated by rules. */
+.statTiers { display: flex; flex-direction: column; gap: 0; }
+.statTier { display: flex; flex-wrap: wrap; gap: 16px 26px; align-items: baseline; padding: 14px 0; }
+.statTier:first-child { padding-top: 0; }
+.statTier + .statTier { border-top: 1px solid var(--line); }
+.statHero .statValue { font-size: 34px; line-height: 1; }
+.statHero .statValue small { font-size: 14px; }
+.statHero .statLabel { font-size: 11px; margin-top: 5px; }
+.statSm .statValue { font-size: 15px; font-weight: 500; color: var(--dim); }
+.statSm .statValue small { font-size: 10px; }
+.statSm .statLabel { font-size: 9px; letter-spacing: 1px; }
+
+/* Charts sit unboxed on the page, separated by divider rules (not cards). */
+.block { padding: 16px 0 6px; border-bottom: 1px solid var(--line); }
+.navBlock { padding: 2px 0 6px; }
+.chartHead { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.chartHead h3 { margin: 0; }
+.sub { color: var(--dim); font-size: 12px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--dim); font-size: 11px; align-items: center; }
+.legendItem { position: relative; display: inline-flex; align-items: center; gap: 6px; cursor: help; transition: color 0.12s; }
+.legendItem:hover { color: var(--text); }
+.legendItem > svg { display: block; overflow: visible; flex: none; }
+
+.svg { display: block; width: 100%; }
+.inbedBand { opacity: 0.35; pointer-events: none; }
+.scrub { cursor: ew-resize; touch-action: none; }
+.hoverable { cursor: crosshair; }
+.clickable { cursor: pointer; }
+
+/* Single-night modal (matches the Peloton/NEAT day-view). */
+.modalOverlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(5, 5, 4, 0.78);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 6vh 16px;
+}
+.modal {
+  width: min(920px, 94vw);
+  background: var(--bg); border: 1px solid var(--line);
+  padding: 20px 22px 22px;
+}
+.modalHead {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; border-bottom: 1px solid var(--line);
+  padding-bottom: 14px; margin-bottom: 16px;
+}
+.modalHeadRight { display: flex; align-items: center; gap: 10px; flex: none; }
+/* In the modal the stepper sits near the right edge, so anchor its tooltip to
+   the right so the 266px popover doesn't overflow the modal. */
+.modalHeadRight .stepper .infoPop { left: auto; right: -4px; }
+.modalHeadRight .stepper .infoPop::before { left: auto; right: 14px; }
+/* The entire date title is the click target — button reset so the large date
+   typography reads identically to plain text. */
+.modalTitleRow {
+  display: flex; align-items: baseline; gap: 10px;
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.modalTitle {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+}
+/* Discoverable affordance: an inline edit icon + label, hidden until the title is
+   hovered or keyboard-focused (or the picker is open), then fades in lime-tinted. */
+.changeDate {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: var(--lime);
+  opacity: 0; transform: translateY(1px);
+  transition: opacity 0.14s, transform 0.14s;
+}
+.changeDate svg { display: block; color: var(--dim); }
+.modalTitleRow:hover .changeDate,
+.modalTitleRow:focus-visible .changeDate,
+.modalTitleRow[aria-expanded='true'] .changeDate { opacity: 0.85; transform: none; }
+.modalTitleRow:hover .changeDate svg,
+.modalTitleRow:focus-visible .changeDate svg,
+.modalTitleRow[aria-expanded='true'] .changeDate svg { color: var(--lime); }
+.modalSub { color: var(--dim); font-size: 12px; margin-top: 4px; }
+.modalStepHint {
+  color: var(--dim); font-size: 10px; letter-spacing: 0.5px;
+  text-align: center; margin-top: 14px; opacity: 0.6;
+}
+
+.napGrid { width: 100%; }
+.miniLabel { color: var(--dim); font-size: 10px; margin: 0 0 3px 46px; }
+.miniLabelB { color: var(--dim); font-size: 10px; margin: 3px 0 0 46px; }
+
+.tip {
+  position: fixed; pointer-events: none; z-index: 20;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 0;
+  padding: 9px 4px; font-size: 11px; line-height: 1.5;
+  /* Stable width: content-driven (max-content) width jitters day-to-day because
+     the widest value string changes (e.g. an integer vs a decimal HRV), so the
+     box is locked to a fixed width and only shrinks on very narrow viewports.
+     Side padding is kept small here — each section pads itself (7px) so they all
+     align to a common inner edge while getting their own breathing room. */
+  width: 356px; max-width: calc(100vw - 16px);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.tipBlank { width: max-content; min-width: 180px; max-width: 220px; }
+.tip b { color: var(--lime); font-family: 'Big Shoulders Display', sans-serif; letter-spacing: 1px; text-transform: uppercase; }
+.tipRow { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.tipRow span:first-child { color: var(--dim); display: inline-flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tipRow span:last-child { white-space: nowrap; flex: none; text-align: right; }
+
+/* --- Redesigned day tooltip: bold date header, a prominent hero line, then
+   grouped sections divided by subtle rules — matching the modal's statTier
+   hierarchy in a compact form. The section matching the hovered chart gets a
+   lighter bounding box (tipGroupHot) to draw the eye. --- */
+.tipHead { display: block; margin-bottom: 6px; }
+.tipHeadRow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 6px; padding: 0 7px; }
+.tipHeadRow .tipHead { margin-bottom: 0; }
+.tipSourceTop { font-size: 9px; color: var(--dim); text-align: right; white-space: nowrap; flex: none; }
+.tipHero {
+  display: flex; gap: 22px; align-items: baseline;
+  padding: 0 7px 8px; border-bottom: 1px solid var(--line);
+}
+.tipHero > span { display: flex; flex-direction: column; }
+.tipHeroVal { font-size: 20px; font-weight: 600; color: var(--text); line-height: 1; font-variant-numeric: tabular-nums; }
+.tipHeroLbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-top: 3px; }
+
+.tipGroup { padding: 7px 7px; border-bottom: 1px solid var(--line); }
+.tipGroup:last-of-type { border-bottom: none; }
+/* Section-aware emphasis: subtle border + slightly lighter panel drawn entirely
+   inside the group's own content box via an inset box-shadow (no negative
+   margin), so it never shifts layout and never bleeds past the card edge.
+   Others stay fully readable. */
+.tipGroupHot {
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lime) 40%, var(--line));
+  border-radius: 0;
+}
+.tipGroupLabel { font-size: 8px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--dim); margin-bottom: 3px; }
+.tipDot { display: inline-block; width: 6px; height: 6px; border-radius: 1px; margin-right: 6px; }
+.tipSource { margin-top: 7px; font-size: 9px; color: var(--dim); text-align: right; }
+
+/* --- 2-column layout: Stages spans full width with per-stage spark swimlanes,
+   the remaining groups fill two balanced columns below. --- */
+.tipStages { border-bottom: 1px solid var(--line); }
+.tipStageRow { display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.tipStageName { color: var(--dim); display: inline-flex; align-items: center; }
+.tipStageTime { color: var(--text); text-align: right; }
+.tipStageSpark { display: block; width: 100%; height: 9px; }
+/* minmax(0,1fr) lets each track shrink below its content's min-content so a long
+   value/label can't blow the track (and the whole card) wider than its share —
+   the label ellipsizes instead. */
+.tipGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 2px; }
+.tipCol { display: flex; flex-direction: column; }
+.tipCol .tipGroup:last-child { border-bottom: none; }
+
+/* --- Overnight vitals loading skeleton ---
+   Each row is a real seriesChart-shaped SVG (label + dashed mean line + a ghost
+   curve on the clock axis). The static track pulses; a color-tinted gradient
+   sweeps along the same path so the curve reads as "drawing itself in". */
+.vitalsSkel { display: flex; flex-direction: column; }
+.skelSvg { animation: skelFade 1.6s ease-in-out infinite; }
+.skelSvg:nth-child(2) { animation-delay: 0.12s; }
+.skelSvg:nth-child(3) { animation-delay: 0.24s; }
+.skelSvg:nth-child(4) { animation-delay: 0.36s; }
+.skelTrack {
+  stroke-dasharray: 4 5;
+  animation: skelDash 1.6s linear infinite;
+}
+@keyframes skelDash {
+  to { stroke-dashoffset: -18; }
+}
+@keyframes skelFade {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skelSvg { animation: none; opacity: 0.8; }
+  .skelTrack { animation: none; }
+}
+
+/* --- COLOR TUNER (dev panel) ---------------------------------------------
+   A dismissible in-tab panel that live-previews chart colors by writing the
+   CSS vars in :root at runtime. On-brand dark, IBM Plex Mono, lime accents. */
+.tunerToggle { padding: 0 12px; gap: 0; }
+.tunerToggleSwatch {
+  width: 16px; height: 16px; border-radius: 2px;
+  background: conic-gradient(from 0deg, var(--st-deep), var(--st-core), var(--st-rem), var(--st-awake), var(--st-deep));
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+}
+/* Fixed overlay so the tall panel escapes .pinned's 25vh + overflow:hidden and
+   isn't clipped. Anchored top-right, under the header row. */
+.tunerPanel {
+  position: fixed; z-index: 60; top: 72px; right: 28px;
+  width: min(560px, calc(100vw - 56px)); max-height: calc(100vh - 96px);
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-top: 2px solid var(--lime);
+  background: var(--panel); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.tunerHead {
+  flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.tunerTitle {
+  color: var(--lime); font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+}
+.tunerHint { color: var(--dim); font-size: 10px; letter-spacing: 0.5px; }
+.tunerX {
+  margin-left: auto; background: none; border: 1px solid var(--line);
+  color: var(--dim); cursor: pointer; font-size: 12px; line-height: 1;
+  padding: 4px 8px; font-family: 'IBM Plex Mono', monospace;
+  transition: color 0.12s, border-color 0.12s;
+}
+.tunerX:hover { color: var(--lime); border-color: var(--lime); }
+
+.tunerScroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; }
+.tunerModeBox {
+  border: 1px solid var(--line); padding: 10px 12px; margin-bottom: 12px;
+}
+.tunerModeRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tunerModeLabel {
+  color: var(--text); font-size: 10px; text-transform: uppercase;
+  letter-spacing: 1.5px; margin-bottom: 8px;
+}
+.tunerModeRow .tunerModeLabel { margin-bottom: 0; margin-right: 4px; }
+.tunerRampCtl { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.tunerHuePresets { display: flex; gap: 6px; }
+.tunerSlider {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.tunerSlider input[type='range'] { flex: 1; accent-color: var(--lime); cursor: pointer; }
+
+.tunerGroup { margin-bottom: 12px; }
+.tunerGroupLabel {
+  color: var(--lime); font-size: 10px; text-transform: uppercase;
+  letter-spacing: 1.5px; margin: 4px 0 6px; opacity: 0.85;
+  border-bottom: 1px solid var(--line); padding-bottom: 4px;
+}
+.tunerRow { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.tunerSwatch {
+  width: 16px; height: 16px; border-radius: 2px; flex: none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
+}
+.tunerName { color: var(--text); font-size: 11px; min-width: 96px; flex: none; }
+.tunerChips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tunerChip {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  background: none; border: 1px solid var(--line); color: var(--dim);
+  padding: 4px 8px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.tunerChip:hover { color: var(--lime); border-color: var(--lime); }
+.tunerChipOn { color: var(--bg); background: var(--lime); border-color: var(--lime); }
+.tunerMiniChip {
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  background: none; border: 1px solid var(--line); color: var(--dim);
+  padding: 3px 7px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.tunerMiniChip:hover { color: var(--lime); border-color: var(--lime); }
+.tunerColor {
+  width: 26px; height: 22px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--line);
+}
+.tunerRevert {
+  background: none; border: 1px solid var(--line); color: var(--dim);
+  cursor: pointer; font-size: 12px; line-height: 1; padding: 3px 7px;
+  font-family: 'IBM Plex Mono', monospace; transition: color 0.12s, border-color 0.12s;
+}
+.tunerRevert:hover { color: var(--lime); border-color: var(--lime); }
+
+.tunerFoot {
+  flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-top: 1px solid var(--line);
+}
+.tunerCopy {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  background: var(--lime); color: var(--bg); border: none;
+  padding: 7px 14px; cursor: pointer;
+}
+.tunerCopy:hover { filter: brightness(1.08); }
+.tunerReset {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 1px;
+  background: none; border: 1px solid var(--line); color: var(--dim);
+  padding: 6px 12px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.tunerReset:hover { color: var(--red); border-color: var(--red); }
+/* Export block lives inside the scroll area so it (and the palette rows) can never
+   be clipped on short viewports — only the header + copy/reset foot stay pinned. */
+.tunerExport { margin-top: 4px; }
+.tunerOut {
+  display: block; width: 100%; height: 132px; resize: vertical;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line);
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 1.5;
+  padding: 10px 12px; white-space: pre; overflow: auto;
+}

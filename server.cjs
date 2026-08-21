@@ -19,6 +19,7 @@ const { healthState, runHealthIngest, setupViews, STORE } = require('./scripts/i
 const { computeFitness } = require('./scripts/healthFitness.cjs');
 // Trainer-session reproduction logic lives with its ground-truth labels.
 const { computeTrainerSessions } = require('./labels/trainer-sessions.cjs');
+const { computeSleep, computeNight, computeSleepSeries } = require('./scripts/sleepSessions.cjs');
 let _duckCon = null, _duckInit = null;
 function duck() {
   if (_duckCon) return Promise.resolve(_duckCon);
@@ -1218,6 +1219,51 @@ const server = http.createServer((req, res) => {
         HAVING count(*) > 0
         ORDER BY 1`);
       json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Sleep: per-night stage segments + respiration, and a separate nap list, for
+  // the coordinated Sleep view. See scripts/sleepSessions.cjs for night
+  // attribution, multi-source dedup, and nap splitting.
+  if (req.method === 'GET' && pathname === '/api/health/sleep') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: { nights: [], naps: [] } });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await computeSleep(con);
+      json(res, 200, { ok: true, data });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Per-night box-plot distributions (HR, HRV, respiration, SpO2) + daily load,
+  // for the box-plot vitals sections and the recovery correlations.
+  if (req.method === 'GET' && pathname === '/api/health/sleep/series') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: { hr: [], hrv: [], resp: [], spo2: [], load: [] } });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await computeSleepSeries(con);
+      json(res, 200, { ok: true, data });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // One night's intraday series (HR, respiration, SpO2) for the night modal,
+  // anchored to the same clock axis as the hypnogram. ?date=YYYY-MM-DD.
+  if (req.method === 'GET' && pathname === '/api/health/sleep/night') {
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: { hr: [], resp: [], spo2: [] } });
+    }
+    const date = new URL(req.url, 'http://localhost').searchParams.get('date') || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(res, 400, { ok: false, error: 'bad date (YYYY-MM-DD)' });
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await computeNight(con, date);
+      json(res, 200, { ok: true, data });
     }).catch(e => json(res, 500, { ok: false, error: e.message }));
     return;
   }
