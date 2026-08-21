@@ -9,6 +9,9 @@ manual/
 telemetry/
 targets.json
 
+# dev artifacts (screenshots of personal health data)
+mocks/
+
 # tooling / local state
 .claude/
 .gstack/

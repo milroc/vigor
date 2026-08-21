@@ -243,9 +243,14 @@ export default function LineChart({ title, unit, seriesList, color, dividerT, ze
     ? dotSeries.samples.findIndex(p => p.id === hoverId) : -1;
   const voronoiCells = useMemo(() => {
     if (!dotSeries) return null;
-    const pixels = dotSeries.samples.map(p => [x(p.t), y(p.v)]);
-    const vor = Delaunay.from(pixels).voronoi([PAD.l, PAD.t, w - PAD.r, h - PAD.b]);
-    return dotSeries.samples.map((_, i) => vor.renderCell(i));
+    // Guard against degenerate/NaN inputs (e.g. null values → NaN pixels):
+    // a Delaunay throw here would otherwise crash the whole page.
+    try {
+      const pixels = dotSeries.samples.map(p => [x(p.t), y(p.v)]);
+      if (pixels.some(([px, py]) => !Number.isFinite(px) || !Number.isFinite(py))) return null;
+      const vor = Delaunay.from(pixels).voronoi([PAD.l, PAD.t, w - PAD.r, h - PAD.b]);
+      return dotSeries.samples.map((_, i) => vor.renderCell(i));
+    } catch { return null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dotSeries, w, h, tMin, tMax, vMin, vMax]);
 
