@@ -1,0 +1,16 @@
+.wrap { padding: 4px 2px 12px; }
+
+.legendRow {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px; margin-bottom: 12px;
+}
+.summary { color: var(--dim); font-size: 12px; }
+.summary strong { color: var(--text); }
+
+.legend { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11px; }
+.legend i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+
+.svg { display: block; }
+.yearLabel { fill: var(--text); font-size: 12px; font-weight: 600; }
+.monthLabel { fill: var(--dim); font-size: 10px; }
+.dowLabel { fill: var(--dim); font-size: 9px; }

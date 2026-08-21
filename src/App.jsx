@@ -2,10 +2,14 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
 import { runVoltra } from './api.js';
 import Dashboard from './pages/Dashboard.jsx';
-import Backup from './pages/Backup.jsx';
+import Sync from './pages/Sync.jsx';
 import Workout from './pages/Workout.jsx';
 import VizLab from './pages/VizLab.jsx';
 import Peloton from './pages/Peloton.jsx';
+import Health from './pages/Health.jsx';
+import Neat from './pages/Neat.jsx';
+import Cardio from './pages/Cardio.jsx';
+import Sleep from './pages/Sleep.jsx';
 import s from './App.module.css';
 
 export default function App() {
@@ -32,9 +36,13 @@ export default function App() {
         <NavLink to="/" className={s.wordmark}>VIGOR<small>HEALTH</small></NavLink>
         <nav className={s.nav}>
           <NavLink to="/" end className={navClass}>Lift</NavLink>
-          <NavLink to="/backup" className={navClass}>Backup</NavLink>
+          <NavLink to="/sync" className={navClass}>Sync</NavLink>
           <NavLink to="/viz" className={navClass}>Movement Report</NavLink>
           <NavLink to="/peloton" className={navClass}>Peloton</NavLink>
+          <NavLink to="/health" className={navClass}>Apple Health</NavLink>
+          <NavLink to="/neat" className={navClass}>NEAT</NavLink>
+          <NavLink to="/cardio" className={navClass}>Cardio</NavLink>
+          <NavLink to="/sleep" className={navClass}>Sleep</NavLink>
         </nav>
         <div className={s.connBadge}>
           <span className={s.connDot + (connected ? ` ${s.on}` : '')} />
@@ -43,10 +51,14 @@ export default function App() {
       </header>
       <Routes>
         <Route path="/" element={<Dashboard status={status} onStatusChange={setStatus} />} />
-        <Route path="/backup" element={<Backup />} />
+        <Route path="/sync" element={<Sync />} />
         <Route path="/workout/:id" element={<Workout />} />
         <Route path="/viz" element={<VizLab />} />
         <Route path="/peloton" element={<Peloton />} />
+        <Route path="/health" element={<Health />} />
+        <Route path="/neat" element={<Neat />} />
+        <Route path="/cardio" element={<Cardio />} />
+        <Route path="/sleep" element={<Sleep />} />
       </Routes>
     </>
   );

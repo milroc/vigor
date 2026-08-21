@@ -119,7 +119,7 @@ function FitnessPanel({ current, selection, setSelection, onOpenWorkout, header,
   // Default: neither selected.
   const [winA, setWinA] = useState(null);
   const [winB, setWinB] = useState(null);
-  // Weight/age/sex come from manual/profile.json — no inputs; they feed
+  // Weight/age/sex come from labels/profile.json — no inputs; they feed
   // the VO2max conversion and target bands only.
   const [profile, setProfile] = useState({});
   useEffect(() => {

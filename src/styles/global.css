@@ -8,9 +8,46 @@
   --dim: #6b6b60;
   --text: #e8e8e0;
   --red: #ff4d3a;
+
+  /* Sleep-tab chart palette — runtime-tunable via the in-tab COLOR TUNER (Sleep.jsx
+     reads these as SVG fill/stroke). Stages are a muted 268° luminance ramp
+     (sat 0.19, spread 0.35) with awake as a contrasting accent; the tuner can
+     override any of these live via document.documentElement.style.setProperty. */
+  --st-deep: #66547b;
+  --st-core: #9380a8;
+  --st-rem: #c0b5cc;
+  --st-awake: #eaa357;
+  --inbed-pre: #66686a;
+  --inbed-post: #3d3d37;
+  --c-resp: #9fe8ff;
+  --c-spo2: #e8e8e0;
+  --c-dist: #ff8a5c;
+  --c-fullwake: #c0453a;
+  --c-hr: #ff8fb3;
+  --c-hrv: #e0b0ff;
+  --c-nap: #e6c456;
+  --c-debt: #d15c42;
+  --c-load: #4a4a44;
+  --c-rhr: #ff6f91;      /* following-day resting HR (recovery) */
+  --c-daylight: #f2c14e; /* time in daylight (bedtime input) */
+  /* Consistency's own palette — distinct from stage colors (indigo bed, gold wake). */
+  --tgt-bed: #7d8bd4;
+  --tgt-wake: #f5a623;
+  /* Stage Composition mute — a filter() the tuner pulls down; default = no-op. */
+  --comp-mute: saturate(1) brightness(1);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Scrollbars blend into the page instead of rendering as a lighter grey band on
+   the right (the default dark-mode track reads as an overflow seam next to the
+   full-bleed charts). */
+html { scrollbar-color: var(--line) var(--bg); scrollbar-width: thin; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid var(--bg); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #33332c; }
+::-webkit-scrollbar-corner { background: var(--bg); }
 
 body {
   background: var(--bg);
@@ -34,13 +71,3 @@ body::after {
   background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,0.15) 2px 3px);
   z-index: 99;
 }
-
-/* Scrollbars blend into the page instead of rendering as a lighter grey band on
-   the right (the default dark-mode track reads as an overflow seam next to the
-   full-bleed charts). */
-html { scrollbar-color: var(--line) var(--bg); scrollbar-width: thin; }
-::-webkit-scrollbar { width: 12px; height: 12px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid var(--bg); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #33332c; }
-::-webkit-scrollbar-corner { background: var(--bg); }

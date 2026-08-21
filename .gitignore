@@ -5,7 +5,12 @@ dist/
 # runtime user data written by server.cjs
 .env
 backups/
-manual/
+store/
+# labels/ holds hand-labeled ground truth: personal data (*.json) stays local,
+# reproduction logic (*.cjs) and schema examples (*.example.json) are committed.
+labels/*
+!labels/*.example.json
+!labels/*.cjs
 telemetry/
 targets.json
 

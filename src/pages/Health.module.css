@@ -1,0 +1,7 @@
+/* Health is now the full FitnessPanel, so it uses Peloton's fit-to-viewport
+   layout: the page itself never scrolls on desktop — the chart area and the
+   bottom table/correlations/heartrates pane scroll internally. */
+.main { width: 100%; padding: 20px 28px 16px; display: flex; flex-direction: column; }
+@media (min-width: 981px) {
+  .main { flex: 1; min-height: 0; overflow: hidden; }
+}
