@@ -19,6 +19,8 @@ const { healthState, runHealthIngest, setupViews, STORE } = require('./scripts/i
 const { computeFitness } = require('./scripts/healthFitness.cjs');
 // Trainer-session reproduction logic lives with its ground-truth labels.
 const { computeTrainerSessions } = require('./labels/trainer-sessions.cjs');
+const { listAnalyses, runAnalysis, saveAnalysis, deleteAnalysis } = require('./scripts/analyses.cjs');
+const { runAgent } = require('./scripts/adhocAgent.cjs');
 let _duckCon = null, _duckInit = null;
 function duck() {
   if (_duckCon) return Promise.resolve(_duckCon);
@@ -1269,6 +1271,72 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Ad-hoc analysis registry. No name → the list; ?name=<x> → run it and return
+  // normalized tables plus the source code of the calculation modules.
+  if (req.method === 'GET' && pathname === '/api/health/analysis') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const name = q.get('name') || '';
+    if (!name) return json(res, 200, { ok: true, data: { analyses: listAnalyses() } });
+    if (!/^[a-z0-9-]+$/.test(name)) return json(res, 400, { ok: false, error: 'bad name' });
+    if (!fs.existsSync(path.join(STORE, 'workouts.parquet'))) {
+      return json(res, 200, { ok: true, data: null });
+    }
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await runAnalysis(con, name);
+      json(res, 200, { ok: true, data });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Ad-hoc analysis agent: NL request → one read-only query over the parquet
+  // views → plan + generated SQL + result preview (nothing is saved here).
+  if (req.method === 'POST' && pathname === '/api/health/agent') {
+    if (!requireJson(req, res)) return;
+    readBody(req, res, 200_000, body => {
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+      const messages = Array.isArray(parsed.messages) ? parsed.messages.slice(-16) : [];
+      if (!messages.length || messages.some(m => typeof m.text !== 'string' || m.text.length > 2000)) {
+        return json(res, 400, { ok: false, error: 'messages must be non-empty, each ≤2000 chars' });
+      }
+      if (!fs.existsSync(path.join(STORE, 'workouts.parquet'))) {
+        return json(res, 400, { ok: false, error: 'no Apple Health data ingested yet' });
+      }
+      duck().then(async con => {
+        await setupViews(con);
+        const data = await runAgent(con, { messages });
+        json(res, 200, { ok: true, data });
+      }).catch(e => json(res, 502, { ok: false, error: e.message }));
+    });
+    return;
+  }
+
+  // Create/update an editable notebook analysis (name omitted = new).
+  if (req.method === 'POST' && pathname === '/api/health/analysis/save') {
+    if (!requireJson(req, res)) return;
+    readBody(req, res, 500_000, body => {
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+      try { json(res, 200, { ok: true, data: saveAnalysis(parsed) }); }
+      catch (e) { json(res, 400, { ok: false, error: e.message }); }
+    });
+    return;
+  }
+
+  // Delete a saved analysis.
+  if (req.method === 'POST' && pathname === '/api/health/analysis/delete') {
+    if (!requireJson(req, res)) return;
+    readBody(req, res, 10_000, body => {
+      let name;
+      try { name = JSON.parse(body).name; } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+      if (typeof name !== 'string' || !name) return json(res, 400, { ok: false, error: 'name required' });
+      try { json(res, 200, { ok: true, data: deleteAnalysis(name) }); }
+      catch (e) { json(res, 400, { ok: false, error: e.message }); }
+    });
+    return;
+  }
+
   // Per-workout time series for one metric (default HeartRate), as second
   // offsets from workout start. ?idx=<int>&metric=<Name>.
   if (req.method === 'GET' && pathname === '/api/health/workout/series') {
@@ -1290,6 +1358,24 @@ const server = http.createServer((req, res) => {
         ORDER BY r.start_ts`);
       json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
     }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Read-only SQL against the health views (ah_records, ah_records_dedup,
+  // ah_daily, ah_workouts). Local-only; also the surface the future agent uses.
+  if (req.method === 'POST' && pathname === '/api/health/query') {
+    if (!requireJson(req, res)) return;
+    readBody(req, res, 100_000, body => {
+      let sql;
+      try { sql = JSON.parse(body).sql; } catch { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+      if (typeof sql !== 'string' || !sql.trim()) return json(res, 400, { ok: false, error: 'sql required' });
+      if (!READ_ONLY_SQL.test(sql)) return json(res, 400, { ok: false, error: 'only read-only queries allowed' });
+      duck().then(async con => {
+        await setupViews(con);
+        const rd = await con.runAndReadAll(sql);
+        json(res, 200, { ok: true, data: rd.getRowObjectsJson() });
+      }).catch(e => json(res, 400, { ok: false, error: e.message }));
+    });
     return;
   }
 

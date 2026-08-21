@@ -55,3 +55,9 @@ export const getHealthTrainer = () => get('/api/health/trainer');
 export const getHealthWorkoutSeries = (idx, metric = 'HeartRate') =>
   get(`/api/health/workout/series?idx=${idx}&metric=${encodeURIComponent(metric)}`);
 export const getProfile = () => get('/api/profile');
+export const listAnalyses = () => get('/api/health/analysis');
+export const getAnalysis = name => get(`/api/health/analysis?name=${encodeURIComponent(name)}`);
+export const runAdhocAgent = messages => post('/api/health/agent', { messages });
+export const saveAnalysis = notebook => post('/api/health/analysis/save', notebook);
+export const deleteAnalysis = name => post('/api/health/analysis/delete', { name });
+export const queryHealth = sql => post('/api/health/query', { sql });

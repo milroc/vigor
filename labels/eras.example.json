@@ -1,0 +1,12 @@
+{
+  "description": "Copy to labels/eras.json and edit. Personal life-eras for the Ad-hoc 'Life eras comparison'. Each era is a labeled date window; markers/activity/workout-mix are averaged within it and deltas are taken vs the FIRST era in the list.",
+  "summary": "one-line framing of the eras, shown in the analysis description",
+  "eras": [
+    { "key": "era-1", "label": "First period", "from": "2019-01-01", "to": "2020-12-31" },
+    { "key": "era-2", "label": "Second period", "from": "2021-01-01", "to": "2022-12-31" },
+    { "key": "era-3", "label": "Third period", "from": "2023-01-01", "to": "2024-12-31" }
+  ],
+  "notes": [
+    "Free-form caveats shown under the comparison — data coverage, instrument changes, small sample sizes, etc."
+  ]
+}
