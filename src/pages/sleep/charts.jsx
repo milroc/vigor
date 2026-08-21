@@ -1,7 +1,31 @@
-import { useRef, useMemo } from 'react';
+import { memo, useEffect, useRef, useMemo } from 'react';
 import { BED_TGT, DEBT, DIST, FULLWAKE, HR, HRV, INBED_POST, INBED_PRE, NAP, RESP, RHR, STAGE, WAKE_TGT } from './palette.js';
 import { CAP_MIN, PAD_L, PAD_R, clamp, clock, labelWidth, niceTicks, pctl, timeTicks, useMeasure } from './helpers.js';
+import { getHover, subscribeHover } from './hoverStore.js';
 import s from '../Sleep.module.css';
+
+// ---- The hovered-column band. It used to be a <rect> inside each chart's SVG,
+// which meant every pointer move dirtied all twelve SVGs and forced Blink to
+// re-rasterize ~44k marks at the "All" range. It's now a plain div layered over
+// the chart and moved by writing a transform straight to the node — the SVGs are
+// never touched, so their rasters stay cached and hover costs nothing to paint. ----
+function HoverBand({ lo, hi, cw, padL, top, height, alpha = 0.13, ready }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const apply = h => {
+      const i = h?.i;
+      if (!ready || i == null || i < lo || i > hi) { el.style.opacity = '0'; return; }
+      el.style.opacity = String(alpha);
+      el.style.width = `${cw}px`;
+      el.style.transform = `translate3d(${padL + (i - lo) * cw}px, 0, 0)`;
+    };
+    apply(getHover());
+    return subscribeHover(apply);
+  }, [lo, hi, cw, padL, alpha, ready]);
+  return <div ref={ref} className={s.hoverBand} style={{ top, height }} aria-hidden="true" />;
+}
 
 // ---- Navigator: the date selector. A miniature all-time skyline (each night's
 // bed→wake band) with a draggable window: drag an edge to move start/end, drag
@@ -11,6 +35,16 @@ export function Navigator({ nights, win, onWin }) {
   const [ref, w] = useMeasure();
   const H = 44, PAD = { t: 4, r: 6, b: 4, l: 6 };
   const drag = useRef(null);
+  // Coalesce drag updates to one per frame. A trackpad emits pointermoves faster
+  // than the page can rebuild every chart for a new window, so without this the
+  // handler queues renders it can never catch up on and the drag falls behind.
+  const raf = useRef(0), pending = useRef(null);
+  const emit = next => {
+    pending.current = next;
+    if (raf.current) return;
+    raf.current = requestAnimationFrame(() => { raf.current = 0; onWin(pending.current); });
+  };
+  useEffect(() => () => { if (raf.current) cancelAnimationFrame(raf.current); }, []);
   const N = nights.length;
   const plotW = Math.max(w - PAD.l - PAD.r, 1), plotH = H - PAD.t - PAD.b;
   const x = i => PAD.l + (i / (N - 1)) * plotW;
@@ -37,16 +71,16 @@ export function Navigator({ nights, win, onWin }) {
     const mode = Math.abs(px - xLo) <= GRIP ? 'lo' : Math.abs(px - xHi) <= GRIP ? 'hi'
       : px > xLo && px < xHi ? 'pan' : 'new';
     drag.current = { mode, start: idxAt(e.clientX), win: [lo, hi] };
-    if (mode === 'new') onWin([idxAt(e.clientX), idxAt(e.clientX)]);
+    if (mode === 'new') emit([idxAt(e.clientX), idxAt(e.clientX)]);
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* unsupported env */ }
   };
   const onMove = e => {
     const d = drag.current; if (!d) return;
     const i = idxAt(e.clientX), [lo, hi] = d.win;
-    if (d.mode === 'pan') { const width = hi - lo; const s0 = clamp(lo + (i - d.start), 0, N - 1 - width); onWin([s0, s0 + width]); }
-    else if (d.mode === 'lo') onWin([Math.min(i, hi), hi]);
-    else if (d.mode === 'hi') onWin([lo, Math.max(i, lo)]);
-    else onWin([Math.min(d.start, i), Math.max(d.start, i)]);
+    if (d.mode === 'pan') { const width = hi - lo; const s0 = clamp(lo + (i - d.start), 0, N - 1 - width); emit([s0, s0 + width]); }
+    else if (d.mode === 'lo') emit([Math.min(i, hi), hi]);
+    else if (d.mode === 'hi') emit([lo, Math.max(i, lo)]);
+    else emit([Math.min(d.start, i), Math.max(d.start, i)]);
   };
   const onUp = () => { drag.current = null; };
 
@@ -70,7 +104,7 @@ export function Navigator({ nights, win, onWin }) {
 
 // ---- Stage Composition: per-night stacked stage minutes over the selected
 // window. Fixed 10h ceiling; longer nights overflow the top. ----
-export function Composition({ nights, win, hover, onHover, onOpen, targets, padL = PAD_L, section }) {
+export const Composition = memo(function Composition({ nights, win, onHover, onOpen, targets, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const H = 200, PAD = { t: 14, r: PAD_R, b: 6, l: padL };
   const [lo, hi] = win;
@@ -96,10 +130,9 @@ export function Composition({ nights, win, hover, onHover, onOpen, targets, padL
 
   const idxAt = e => clamp(lo + Math.floor(((e.clientX - ref.current.getBoundingClientRect().left) / ref.current.getBoundingClientRect().width * w - PAD.l) / cw), lo, hi);
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
-  const hot = hover != null && hover >= lo && hover <= hi;
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className={s.chartWrap}>
       {w > 0 && (
         <svg className={`${s.svg} ${s.clickable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           style={{ filter: 'var(--comp-mute)' }}
@@ -150,15 +183,74 @@ export function Composition({ nights, win, hover, onHover, onOpen, targets, padL
               </g>
             );
           })()}
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={PAD.t} width={cw} height={plotH} fill="#fff" opacity={0.13} pointerEvents="none" />}
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.13} ready={w > 0} />
     </div>
   );
-}
+});
+
+// ---- Skyline's date axis. Split out of the main SVG into its own small overlay
+// so the hovered-date label and the fading month ticks can update without
+// invalidating the 23k-mark skyline behind them. ----
+const SkylineAxis = memo(function SkylineAxis({ nights, lo, hi, cw, padL, w, plotW, H }) {
+  const AX = 18;
+  const ticks = useMemo(
+    () => timeTicks(nights, lo, hi, plotW).map(t => ({ ...t, x: padL + (t.i - lo) * cw, lw: labelWidth(t.lbl, 10) })),
+    [nights, lo, hi, cw, padL, plotW]);
+  const tickRefs = useRef([]);
+  const labRef = useRef(null);
+  useEffect(() => {
+    const apply = h => {
+      const i = h?.i;
+      const lab = labRef.current;
+      const hot = i != null && i >= lo && i <= hi && nights[i];
+      if (!hot) {
+        tickRefs.current.forEach(el => { if (el) el.style.opacity = '1'; });
+        if (lab) lab.style.display = 'none';
+        return;
+      }
+      const n = nights[i];
+      const dateStr = new Date(n.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+        + (n.blank ? ' · no data' : '');
+      const lw = labelWidth(dateStr, 10), hw = lw / 2;
+      const cxAnchor = padL + (i - lo) * cw + cw / 2;
+      const leftEdge = padL, rightEdge = w - PAD_R;
+      let labelX, anchor, labelCenter;
+      if (cxAnchor - hw < leftEdge) { anchor = 'start'; labelX = leftEdge; labelCenter = leftEdge + hw; }
+      else if (cxAnchor + hw > rightEdge) { anchor = 'end'; labelX = rightEdge; labelCenter = rightEdge - hw; }
+      else { anchor = 'middle'; labelX = cxAnchor; labelCenter = cxAnchor; }
+      if (lab) {
+        lab.style.display = '';
+        lab.textContent = dateStr;
+        lab.setAttribute('x', labelX);
+        lab.setAttribute('text-anchor', anchor);
+      }
+      const hideR = hw + 16, showR = hw + 44;
+      tickRefs.current.forEach((el, k) => {
+        if (!el) return;
+        const t = ticks[k];
+        el.style.opacity = String(clamp((Math.abs(t.x + t.lw / 2 - labelCenter) - hideR) / (showR - hideR), 0, 1));
+      });
+    };
+    apply(getHover());
+    return subscribeHover(apply);
+  }, [ticks, nights, lo, hi, cw, padL, w]);
+
+  if (!w) return null;
+  return (
+    <svg className={`${s.svg} ${s.skyAxis}`} width="100%" height={AX} viewBox={`0 0 ${w} ${AX}`} preserveAspectRatio="none" aria-hidden="true">
+      {ticks.map((t, k) => (
+        <text key={t.i} ref={el => { tickRefs.current[k] = el; }} x={t.x} y={AX - 5} fill="var(--dim)" fontSize="10"
+          style={{ transition: 'opacity 0.18s ease' }}>{t.lbl}</text>
+      ))}
+      <text ref={labRef} y={AX - 5} fill="var(--lime)" fontSize="10" fontWeight="600" style={{ display: 'none' }} />
+    </svg>
+  );
+});
 
 // ---- Skyline: one column per night, y = clock time, colored by stage ----
-export function Skyline({ nights, win, hover, onHover, onOpen, targets, padL = PAD_L, fill, section }) {
+export const Skyline = memo(function Skyline({ nights, win, onHover, onOpen, targets, padL = PAD_L, fill, section }) {
   const [ref, w, hMeas] = useMeasure();
   // In fill mode draw at the real measured pixel height so the viewBox is 1:1 with
   // the rendered box — otherwise preserveAspectRatio="none" squishes the bars.
@@ -201,10 +293,9 @@ export function Skyline({ nights, win, hover, onHover, onOpen, targets, padL = P
 
   const idxAt = e => clamp(lo + Math.floor(((e.clientX - ref.current.getBoundingClientRect().left) / ref.current.getBoundingClientRect().width * w - PAD.l) / cw), lo, hi);
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
-  const hot = hover != null && hover >= lo && hover <= hi;
 
   return (
-    <div ref={ref} className={fill ? s.skyFill : undefined}>
+    <div ref={ref} className={`${s.chartWrap} ${fill ? s.skyFill : ''}`}>
       {w > 0 && (
         <svg className={`${s.svg} ${s.clickable}`} width="100%" height={fill ? '100%' : H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           style={fill ? { flex: 1, minHeight: 0 } : undefined}
@@ -243,42 +334,15 @@ export function Skyline({ nights, win, hover, onHover, onOpen, targets, padL = P
             );
           })()}
           {rects}
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={PAD.t} width={cw} height={plotH} fill="#fff" opacity={0.13} pointerEvents="none" />}
-          {/* Cubism-style axis: month ticks stay put, but any tick the focused-date
-              label would overlap fades out (and back in) gracefully as you hover. */}
-          {(() => {
-            const dateStr = hot && nights[hover]
-              ? new Date(nights[hover].day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + (nights[hover].blank ? ' · no data' : '')
-              : '';
-            // Edge-aware date label: sit centered under the hovered column when there's
-            // room, but if either extent would clip past the plot edge, flip to start/end
-            // anchoring pinned to that edge so the whole label (incl. "· no data") shows.
-            const lw = labelWidth(dateStr, 10), hw = lw / 2;
-            const cxAnchor = PAD.l + (hover - lo) * cw + cw / 2;
-            const leftEdge = PAD.l, rightEdge = w - PAD.r;
-            let labelX, anchor, labelCenter;
-            if (cxAnchor - hw < leftEdge) { anchor = 'start'; labelX = leftEdge; labelCenter = leftEdge + hw; }
-            else if (cxAnchor + hw > rightEdge) { anchor = 'end'; labelX = rightEdge; labelCenter = rightEdge - hw; }
-            else { anchor = 'middle'; labelX = cxAnchor; labelCenter = cxAnchor; }
-            const hideR = hw + 16, showR = hw + 44;
-            return (
-              <>
-                {timeTicks(nights, lo, hi, plotW).map(t => {
-                  const tx = PAD.l + (t.i - lo) * cw;
-                  const op = hot ? clamp((Math.abs(tx + labelWidth(t.lbl, 10) / 2 - labelCenter) - hideR) / (showR - hideR), 0, 1) : 1;
-                  return <text key={t.i} x={tx} y={H - 5} fill="var(--dim)" fontSize="10" opacity={op} style={{ transition: 'opacity 0.18s ease' }}>{t.lbl}</text>;
-                })}
-                {dateStr && (
-                  <text x={labelX} y={H - 5} fill="var(--lime)" fontSize="10" fontWeight="600" textAnchor={anchor} pointerEvents="none">{dateStr}</text>
-                )}
-              </>
-            );
-          })()}
         </svg>
       )}
+      {/* Cubism-style axis: month ticks stay put, but any tick the focused-date
+          label would overlap fades out (and back in) gracefully as you hover. */}
+      <SkylineAxis nights={nights} lo={lo} hi={hi} cw={cw} padL={PAD.l} w={w} plotW={plotW} H={H} />
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.13} ready={w > 0} />
     </div>
   );
-}
+});
 
 // ---- Naps: shares the skyline's date axis (one column per night, gaps on days
 // without naps). Top = the 3 nights before each nap vs the median (recovery
@@ -286,7 +350,7 @@ export function Skyline({ nights, win, hover, onHover, onOpen, targets, padL = P
 // Back-to-back bars sharing one central date axis: nap length grows up (given
 // 3/4 of the height), the 3 nights before each nap hang down below the axis
 // (inverted, 1/4 of the height). A short-sleep run reads as debt under the nap.
-export function NapsPanel({ nights, napDays, win, hover, onHover, onOpen, padL = PAD_L, section }) {
+export const NapsPanel = memo(function NapsPanel({ nights, napDays, win, onHover, onOpen, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const PAD = { l: padL, r: PAD_R };
   const NAP_H = 80, AXIS = 0, DEBT_H = 80, TOP = 6;         // nap : debt = 50 : 50
@@ -303,8 +367,6 @@ export function NapsPanel({ nights, napDays, win, hover, onHover, onOpen, padL =
 
   const idxAt = e => { const rect = ref.current.getBoundingClientRect(); const px = (e.clientX - rect.left) / rect.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
-  const hot = hover != null && hover >= lo && hover <= hi;
-  const bandX = hot ? PAD.l + (hover - lo) * cw : 0;
 
   // Sleep debt for EVERY night: 3-night rolling AVERAGE of the nightly deficit
   // under 7h, using effective sleep (brief wake-ups folded in). Memoized so
@@ -324,11 +386,10 @@ export function NapsPanel({ nights, napDays, win, hover, onHover, onOpen, padL =
   }, [nights, lo, hi, w]);
 
   return (
-    <div ref={ref} className={s.napGrid}>
+    <div ref={ref} className={`${s.chartWrap} ${s.napGrid}`}>
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={onMove} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
-          {hot && <rect x={bandX} y={TOP} width={cw} height={debtBase - TOP} fill="#fff" opacity={0.13} pointerEvents="none" />}
 
           {/* nap length — up (nap-days only) */}
           {[1, 2].map(h => (
@@ -351,13 +412,14 @@ export function NapsPanel({ nights, napDays, win, hover, onHover, onOpen, padL =
           {debtBars}
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={TOP} height={debtBase - TOP} alpha={0.13} ready={w > 0} />
     </div>
   );
-}
+});
 
 // ---- Box-plot per night (min / Q1 / median / Q3 / max) across the window, for
 // vitals that are a timeseries within each night. byDay maps day -> box. ----
-export function BoxSeries({ nights, win, byDay, color, unit, label, hover, onHover, onOpen, H = 168, padL = PAD_L, section }) {
+export const BoxSeries = memo(function BoxSeries({ nights, win, byDay, color, unit, label, onHover, onOpen, H = 168, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const PAD = { t: 14, r: PAD_R, b: 6, l: padL };
   const [lo, hi] = win;
@@ -395,10 +457,9 @@ export function BoxSeries({ nights, win, byDay, color, unit, label, hover, onHov
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
   const onMove = e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section });
-  const hot = hover != null && hover >= lo && hover <= hi;
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className={s.chartWrap}>
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={onMove} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -406,19 +467,19 @@ export function BoxSeries({ nights, win, byDay, color, unit, label, hover, onHov
             <g key={g}><line x1={PAD.l} x2={w - PAD.r} y1={y(g)} y2={y(g)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={y(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={PAD.t} width={cw} height={plotH} fill="#fff" opacity={0.12} pointerEvents="none" />}
           {marks}
           {boxes.length === 0 && <text x={w / 2} y={H / 2} fill="var(--dim)" fontSize="11" textAnchor="middle">no data in this window</text>}
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.12} ready={w > 0} />
     </div>
   );
-}
+});
 
 // ---- "The Morning After" combo (styled like Respiration): next-day HRV box-plots
 // on top, with the following-day resting HR area-encoded as a bubble lane beneath.
 // Both are next-day recovery readouts, so they share one panel + the date axis. ----
-export function NextDayCombo({ nights, win, hrvByDay, rhrByDay, hrvColor, rhrColor, hover, onHover, onOpen, H = 176, padL = PAD_L, section }) {
+export const NextDayCombo = memo(function NextDayCombo({ nights, win, hrvByDay, rhrByDay, hrvColor, rhrColor, onHover, onOpen, H = 176, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const BOT = 26, PAD = { r: PAD_R, l: padL };
   const rhrRow = H - BOT + 13;            // RHR bubble lane sits BELOW the HRV box-plots
@@ -466,10 +527,9 @@ export function NextDayCombo({ nights, win, hrvByDay, rhrByDay, hrvColor, rhrCol
   }, [boxes, view, w, yMin, yMax, rMin, rMax]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
-  const hot = hover != null && hover >= lo && hover <= hi;
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className={s.chartWrap}>
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -478,19 +538,19 @@ export function NextDayCombo({ nights, win, hrvByDay, rhrByDay, hrvColor, rhrCol
               <text x={PAD.l - 6} y={y(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
           <text x={PAD.l - 6} y={rhrRow + 3} fill="var(--dim)" fontSize="8" textAnchor="end">RHR</text>
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={4} width={cw} height={H - 6} fill="#fff" opacity={0.12} pointerEvents="none" />}
           {marks}
           {boxes.length === 0 && <text x={w / 2} y={mTop + plotH / 2} fill="var(--dim)" fontSize="11" textAnchor="middle">no data in this window</text>}
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={4} height={H - 6} alpha={0.12} ready={w > 0} />
     </div>
   );
-}
+});
 
 // ---- Respiration section: respiratory-rate box-plots + a top lane of
 // area-encoded bubbles for breathing disturbances and brief wake-ups. SpO2 is
 // its own box-plot chart (added in the section, not overlaid here). ----
-export function RespirationChart({ nights, win, respBy, hover, onHover, onOpen, padL = PAD_L, section }) {
+export const RespirationChart = memo(function RespirationChart({ nights, win, respBy, onHover, onOpen, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const H = 196, BOT = 46, PAD = { r: PAD_R, l: padL };
   // Brief-wake + disturbance + full-wake bubble lanes sit BELOW the resp box-plots.
@@ -539,10 +599,9 @@ export function RespirationChart({ nights, win, respBy, hover, onHover, onOpen, 
   }, [view, boxes, w, rMin, rMax]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
-  const hot = hover != null && hover >= lo && hover <= hi;
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className={s.chartWrap}>
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -553,18 +612,18 @@ export function RespirationChart({ nights, win, respBy, hover, onHover, onOpen, 
             <g key={g}><line x1={PAD.l} x2={w - PAD.r} y1={yR(g)} y2={yR(g)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={yR(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={4} width={cw} height={H - 6} fill="#fff" opacity={0.12} pointerEvents="none" />}
           {marks}
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={4} height={H - 6} alpha={0.12} ready={w > 0} />
     </div>
   );
-}
+});
 
 // ---- Consistency: rolling 14-night standard deviation of bedtime and wake
 // time (lower = more regular). ----
 export const CONSIST_WIN = 14;
-export function Consistency({ nights, win, hover, onHover, onOpen, targets, padL = PAD_L }) {
+export const Consistency = memo(function Consistency({ nights, win, onHover, onOpen, targets, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const H = 168, PAD = { t: 14, r: PAD_R, b: 6, l: padL };
   const [lo, hi] = win;
@@ -608,11 +667,10 @@ export function Consistency({ nights, win, hover, onHover, onOpen, targets, padL
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [delta, lo, hi, w]);
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
-  const hot = hover != null && hover >= lo && hover <= hi;
   const gl = g => `${g > 0 ? '+' : ''}${g}`;
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className={s.chartWrap}>
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -622,21 +680,21 @@ export function Consistency({ nights, win, hover, onHover, onOpen, targets, padL
           ))}
           <line x1={PAD.l} x2={w - PAD.r} y1={mid} y2={mid} stroke="var(--dim)" opacity={0.6} />
           <text x={PAD.l - 6} y={mid + 3} fill="var(--dim)" fontSize="10" textAnchor="end">0</text>
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={PAD.t} width={cw} height={plotH} fill="#fff" opacity={0.12} pointerEvents="none" />}
           {dots}
           <path d={line('bed')} fill="none" stroke={BED_TGT} strokeWidth={1.8} />
           <path d={line('wake')} fill="none" stroke={WAKE_TGT} strokeWidth={1.8} />
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.12} ready={w > 0} />
     </div>
   );
-}
+});
 
 // ---- Recovery correlation: next-day HRV (line) over daily training load
 // (faint bars), sharing the date axis with the nap/debt chart above. ----
 // Generic per-night line/bars chart sharing the date axis with every other
 // chart (identical PAD_L/PAD_R). valueAt(i) returns the value for night index i.
-export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'line', hover, onHover, onOpen, H = 116, padL = PAD_L, section }) {
+export const MiniChart = memo(function MiniChart({ nights, win, valueAt, color, unit, label, type = 'line', onHover, onOpen, H = 116, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const PAD = { t: 14, r: PAD_R, b: 6, l: padL };
   const [lo, hi] = win;
@@ -683,10 +741,9 @@ export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'li
   }, [pts, w, yMin, yMax]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
-  const hot = hover != null && hover >= lo && hover <= hi;
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className={s.chartWrap}>
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
@@ -697,14 +754,14 @@ export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'li
           {type === 'bubble' && pts.length > 0 && (
             <text x={PAD.l - 6} y={PAD.t + plotH / 2 + 3} fill="var(--dim)" fontSize="9" textAnchor="end">{bvMin}–{bvMax}</text>
           )}
-          {hot && <rect x={PAD.l + (hover - lo) * cw} y={PAD.t} width={cw} height={plotH} fill="#fff" opacity={0.12} pointerEvents="none" />}
           {marks}
           {pts.length === 0 && <text x={w / 2} y={H / 2} fill="var(--dim)" fontSize="11" textAnchor="middle">no data in this window</text>}
         </svg>
       )}
+      <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.12} ready={w > 0} />
     </div>
   );
-}
+});
 
 export function Stat({ value, unit, label }) {
   return <div><div className={s.statValue}>{value}{unit && <small> {unit}</small>}</div><div className={s.statLabel}>{label}</div></div>;

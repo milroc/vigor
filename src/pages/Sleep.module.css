@@ -279,6 +279,16 @@
 .legendItem > svg { display: block; overflow: visible; flex: none; }
 
 .svg { display: block; width: 100%; }
+/* Chart shell: the hovered-column band and the skyline's date axis are layered
+   over the plot as siblings of the SVG rather than children of it, so moving
+   them never invalidates the chart's raster. */
+.chartWrap { position: relative; }
+.hoverBand {
+  position: absolute; left: 0; top: 0; width: 0;
+  background: #fff; opacity: 0; pointer-events: none;
+  will-change: transform; contain: strict;
+}
+.skyAxis { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: none; }
 .inbedBand { opacity: 0.35; pointer-events: none; }
 .scrub { cursor: ew-resize; touch-action: none; }
 .hoverable { cursor: crosshair; }
