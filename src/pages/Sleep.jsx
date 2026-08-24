@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { getHealthSleep, getHealthSleepSeries, getHealthSleepNight } from '../api.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getHealthSleep, getHealthSleepSeries } from '../api.js';
 import shared from '../styles/shared.module.css';
 import s from './Sleep.module.css';
 import {
@@ -8,7 +8,9 @@ import {
 } from './sleep/palette.js';
 import TunerPanel from './sleep/TunerPanel.jsx';
 
-import { PAD_R, labelWidth, srcLabel, clamp, clock, hm, fmtMon, fmtDay, fillNightGaps, std } from './sleep/helpers.js';
+import { PAD_R, labelWidth, clearLabelWidthCache, srcLabel, clamp, clock, hm, fmtMon, fmtDay, fillNightGaps, std } from './sleep/helpers.js';
+import { HoverProvider, useHoverStore, useHoverTarget } from './sleep/hoverStore.jsx';
+import { HoverTooltip } from './sleep/HoverTooltip.jsx';
 import { InfoTip, DateStepper, RangePicker } from './sleep/pickers.jsx';
 import { Legend, SubLabel } from './sleep/Legend.jsx';
 import { Navigator, Composition, Skyline, NapsPanel, BoxSeries, NextDayCombo, RespirationChart, Consistency, MiniChart, Stat } from './sleep/charts.jsx';
@@ -18,30 +20,54 @@ import { NightModal } from './sleep/NightModal.jsx';
 const ym = d => d && d.slice(0, 7);                     // "2023-09"
 const yrRange = (a, b) => !a ? null : a.slice(0, 4) === b.slice(0, 4) ? a.slice(0, 4) : `${a.slice(0, 4)}–${b.slice(2, 4)}`;
 
+// The date readout, its ‹ › arrows and their enabled state all depend on which
+// night is hovered. Subscribing here rather than in Sleep keeps a pointer move
+// from re-rendering the page (and re-running every chart body) — at the "All"
+// range every pixel is a different night, so that ran on every single move.
+function HeaderSelector({ nights, win, reachable, stepUnit, pickBtnRef, openPick, closePickSoon,
+  pick, setPick, firstDay, lastDay, applyPick, range, gran, applyGran, applyRange, changeWin }) {
+  const { i } = useHoverTarget();
+  // A hover published a frame before the window changed can name a night that is
+  // no longer on screen; the column bands already ignore those, so ignore them here.
+  const hovered = i != null && i >= win[0] && i <= win[1] && nights[i];
+  let label;
+  if (hovered) {
+    label = new Date(nights[i].day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  } else {
+    const a = new Date(nights[win[0]].day + 'T00:00:00'), b = new Date(nights[win[1]].day + 'T00:00:00');
+    const sameYear = a.getFullYear() === b.getFullYear();
+    const fa = a.toLocaleDateString('en', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+    const fb = b.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
+    label = `${fa} – ${fb}`;
+  }
+  const tip = hovered
+    ? <>Press <strong>← →</strong> to jump to the previous or next night with data.</>
+    : <>Press <strong>← →</strong> to page the date range. Hover a night to step one date at a time instead.</>;
+  const hoverIdx = hovered ? i : null;
+  return (
+    <span className={s.stepWrap}>
+      <DateStepper label={label} sub={null} onPrev={() => stepUnit(-1, hoverIdx)} onNext={() => stepUnit(1, hoverIdx)}
+        labelRef={pickBtnRef} onLabel={openPick}
+        onHoverOpen={openPick} onHoverClose={closePickSoon}
+        canPrev={reachable(-1, hoverIdx)} canNext={reachable(1, hoverIdx)} />
+      {pick && <RangePicker min={firstDay} max={lastDay} init={pick} anchorRef={pickBtnRef}
+        onApply={applyPick} activeRange={range} activeGran={gran}
+        onGran={g => { applyGran(g); setPick(null); }} onRange={(k, d) => { applyRange(k, d); setPick(null); }}
+        onMouseEnter={openPick} onMouseLeave={closePickSoon} hint={tip}
+        brush={<div className={s.pickBrush}><Navigator nights={nights} win={win} onWin={changeWin} /></div>} />}
+    </span>
+  );
+}
+
 export default function Sleep() {
+  return <HoverProvider><SleepView /></HoverProvider>;
+}
+
+function SleepView() {
+  const store = useHoverStore();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [win, setWin] = useState(null);
-  const [hover, setHover] = useState(null);
-  const tipRef = useRef(null);
-  // Keep the day tooltip fully on-screen: after it renders at the cursor, measure
-  // it and clamp against every viewport edge — flip left/above when it would
-  // overflow right/bottom, clamp to an 8px inset otherwise.
-  useEffect(() => {
-    const el = tipRef.current;
-    if (!el || !hover || hover.cx == null) return;
-    const M = 8, GAP = 14;
-    const { width: w, height: h } = el.getBoundingClientRect();
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let left = hover.cx + GAP;
-    if (left + w > vw - M) left = hover.cx - w - GAP; // flip to the left of cursor
-    left = Math.max(M, Math.min(left, vw - w - M));
-    let top = hover.cy + GAP;
-    if (top + h > vh - M) top = Math.min(hover.cy - h - GAP, vh - h - M); // flip above / clamp
-    top = Math.max(M, top);
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-  });
   const [openIdx, setOpenIdx] = useState(null);
   const [range, setRange] = useState('6mo');
   const [gran, setGran] = useState(null); // active nav unit: {type:'cal',unit:'week'|'month'} | {type:'roll',n} | null
@@ -69,7 +95,7 @@ export default function Sleep() {
   // Web fonts load after first paint; re-measure the gutter once IBM Plex Mono is
   // ready so labels can't be clipped by a fallback-font under-measurement.
   const [fontsReady, setFontsReady] = useState(false);
-  useEffect(() => { document.fonts?.ready?.then(() => setFontsReady(true)); }, []);
+  useEffect(() => { document.fonts?.ready?.then(() => { clearLabelWidthCache(); setFontsReady(true); }); }, []);
   // Re-apply any persisted color-tuner working set on load so a reload keeps it,
   // even with the tuner panel closed. (Defaults are untouched if nothing is saved.)
   useEffect(() => { if (tuneEnabled) applyTunerState(); }, []);
@@ -106,7 +132,12 @@ export default function Sleep() {
       const v = byDay.daylight[p.toISOString().slice(0, 10)]; if (v != null) m[n.day] = v;
     }); return m;
   }, [data, byDay]);
-  const targets = { deepMin: 60, deepMax: 110, ...(data?.targets || { asleepMin: 420, bedMin: 420, wakeMin: 840, asleepHours: 7, bedtime: '01:00', wake: '08:00' }) };
+  // Rebuilt every render, this object invalidated Consistency's delta/rolling
+  // memos — which walk all ~1,800 nights with a 14-night inner loop — on every
+  // single pointer move. Memoized so they recompute only when targets change.
+  const targets = useMemo(
+    () => ({ deepMin: 60, deepMax: 110, ...(data?.targets || { asleepMin: 420, bedMin: 420, wakeMin: 840, asleepHours: 7, bedtime: '01:00', wake: '08:00' }) }),
+    [data]);
 
   // Per-metric coverage windows, computed from the data so copy never hardcodes
   // dates (each Watch metric came online at a different time).
@@ -255,21 +286,60 @@ export default function Sleep() {
   const scrollRef = useRef(null);
   const headRef = useRef(null);
   const RESPECT = `button, a, input, h2, h3, [class*="headRow"], [class*="info"], [class*="legendItem"], [class*="subLabel"], [class*="navWrap"], [class*="scrub"], [class*="modalOverlay"], [class*="pickPop"]`;
+  // Cached geometry: both getBoundingClientRect() calls below used to run on every
+  // pointer move, forcing a synchronous layout of a document holding tens of
+  // thousands of SVG nodes. The rects only change on scroll/resize, so they're
+  // cached and invalidated by those events instead.
+  const rects = useRef(null);
+  const invalidateRects = () => { rects.current = null; };
+  useEffect(() => {
+    window.addEventListener('resize', invalidateRects);
+    window.addEventListener('scroll', invalidateRects, true);
+    return () => {
+      window.removeEventListener('resize', invalidateRects);
+      window.removeEventListener('scroll', invalidateRects, true);
+    };
+  }, []);
+  useEffect(invalidateRects, [win, padL, data, series, openIdx, pick, tuner, fontsReady, nux]);
+  const geom = () => {
+    if (!rects.current && scrollRef.current) {
+      rects.current = {
+        scroll: scrollRef.current.getBoundingClientRect(),
+        headBottom: headRef.current ? headRef.current.getBoundingClientRect().bottom : 0,
+      };
+    }
+    return rects.current;
+  };
+
+  // Pointer moves arrive faster than a frame; only the last one in a frame can
+  // matter, so they're coalesced into a single rAF-published hover update.
+  const hoverRaf = useRef(0), hoverNext = useRef(null);
+  // Stable identity: every chart is memo()'d on it, so an inline arrow here would
+  // silently defeat all of them.
+  const publishHover = useCallback(h => {
+    hoverNext.current = h;
+    if (hoverRaf.current) return;
+    hoverRaf.current = requestAnimationFrame(() => { hoverRaf.current = 0; store.setHover(hoverNext.current); });
+  }, [store]);
+  useEffect(() => () => { if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current); }, []);
+
   const onXHover = e => {
     if (!win || !scrollRef.current) return;
+    const g = geom();
+    if (!g) return;
     // Geometric guard: the entire top bar (its padding/borders and the gaps
     // between title / stats / controls) sits above headRow's bottom edge — bail
     // there regardless of the leaf under the cursor, so it never drives the band.
-    if (headRef.current && e.clientY <= headRef.current.getBoundingClientRect().bottom) { setHover(null); return; }
-    if (e.target.closest(RESPECT)) { setHover(null); return; }
+    if (e.clientY <= g.headBottom) { publishHover(null); return; }
+    if (e.target.closest(RESPECT)) { publishHover(null); return; }
     const [lo, hi] = win;
-    const r = scrollRef.current.getBoundingClientRect();
+    const r = g.scroll;
     const cw = (r.width - padL - PAD_R) / (hi - lo + 1);
     if (cw <= 0) return;
     // Infer the source section from the nearest [data-section] ancestor (the gap
     // areas between charts have none → null, no group highlighted).
     const section = e.target.closest('[data-section]')?.dataset.section ?? null;
-    setHover({ i: clamp(lo + Math.floor((e.clientX - r.left - padL) / cw), lo, hi), cx: e.clientX, cy: e.clientY, section });
+    publishHover({ i: clamp(lo + Math.floor((e.clientX - r.left - padL) / cw), lo, hi), cx: e.clientX, cy: e.clientY, section });
   };
   // Companion to onXHover: clicking anywhere in the coordinated x-range (the gaps
   // between/around charts) opens that night — matching the hover surface. Charts
@@ -278,10 +348,12 @@ export default function Sleep() {
   const onXClick = e => {
     if (!win || !scrollRef.current || !data) return;
     if (e.target.closest('svg')) return;
-    if (headRef.current && e.clientY <= headRef.current.getBoundingClientRect().bottom) return;
+    const g = geom();
+    if (!g) return;
+    if (e.clientY <= g.headBottom) return;
     if (e.target.closest(RESPECT)) return;
     const [lo, hi] = win;
-    const r = scrollRef.current.getBoundingClientRect();
+    const r = g.scroll;
     const cw = (r.width - padL - PAD_R) / (hi - lo + 1);
     if (cw <= 0) return;
     const j = nearestReal(clamp(lo + Math.floor((e.clientX - r.left - padL) / cw), lo, hi));
@@ -293,6 +365,7 @@ export default function Sleep() {
   // the arrow keys and the date stepper. Recomputes cx/cy from the same geometry
   // the hover surface uses so the tooltip stays anchored to the new column.
   const stepHover = dir => {
+    const hover = store.getHover();
     if (!win || hover?.i == null || !data) return;
     const [lo, hi] = win;
     let j = hover.i + dir;
@@ -305,7 +378,7 @@ export default function Sleep() {
       const cw = (r.width - padL - PAD_R) / (hi - lo + 1);
       if (cw > 0) cx = r.left + padL + (j - lo + 0.5) * cw;
     }
-    setHover({ i: j, cx, cy, section: hover.section });
+    store.setHover({ i: j, cx, cy, section: hover.section });
   };
 
   // No-hover mode: page the visible window left/right by its own span, keeping
@@ -335,11 +408,11 @@ export default function Sleep() {
   // date; no-hover → page the window. canPrev/canNext grey out a side when there's
   // no reachable target in that direction (window edge after skipping blanks, or
   // the data boundary when paging).
-  const reachable = dir => {
+  const reachable = (dir, hoverIdx) => {
     if (!win || !data) return false;
     const [lo, hi] = win;
-    if (hover?.i != null) {
-      let j = hover.i + dir;
+    if (hoverIdx != null) {
+      let j = hoverIdx + dir;
       while (j >= lo && j <= hi && data.nights[j]?.blank) j += dir;
       return j >= lo && j <= hi;
     }
@@ -347,11 +420,7 @@ export default function Sleep() {
     const N = data.nights.length, span = hi - lo;
     return clamp(lo + dir * (span + 1), 0, N - 1 - span) !== lo;
   };
-  const stepUnit = dir => hover?.i != null ? stepHover(dir) : gran ? stepGran(dir) : pageWin(dir);
-  const stepLeft = () => stepUnit(-1);
-  const stepRight = () => stepUnit(1);
-  const canPrev = reachable(-1);
-  const canNext = reachable(1);
+  const stepUnit = (dir, hoverIdx) => hoverIdx != null ? stepHover(dir) : gran ? stepGran(dir) : pageWin(dir);
 
   // Arrow keys drive the stepper: hovered → step the focused date (skipping
   // blanks); no-hover → page the window. Disabled while a night modal is open
@@ -361,13 +430,13 @@ export default function Sleep() {
       if (openIdx != null) return;
       if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
       const dir = e.key === 'ArrowRight' ? 1 : -1;
-      if (hover?.i != null) { e.preventDefault(); stepHover(dir); }
+      if (store.getHover()?.i != null) { e.preventDefault(); stepHover(dir); }
       else if (win) { e.preventDefault(); gran ? stepGran(dir) : pageWin(dir); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hover, win, data, padL, openIdx, gran]);
+  }, [win, data, padL, openIdx, gran]);
 
   const napByDay = useMemo(() => {
     const m = {}; (data?.naps || []).forEach(p => { (m[p.day] = m[p.day] || []).push(p); }); return m;
@@ -412,7 +481,7 @@ export default function Sleep() {
 
 
   return (
-    <main className={s.main} onPointerMove={onXHover} onPointerLeave={() => setHover(null)} onClick={onXClick}>
+    <main className={s.main} onPointerMove={onXHover} onPointerLeave={() => publishHover(null)} onClick={onXClick}>
       <div className={s.pinned}>
         <div className={s.headRow} ref={headRef}>
           <div className={s.headMain}>
@@ -434,36 +503,13 @@ export default function Sleep() {
             )}
           </div>
           <div className={s.headSel}>
-            {win && data.nights.length > 0 && (() => {
-              const hovered = hover?.i != null && data.nights[hover.i];
-              let label, sub = null;
-              if (hovered) {
-                const d = data.nights[hover.i];
-                label = new Date(d.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-              } else {
-                const a = new Date(data.nights[win[0]].day + 'T00:00:00'), b = new Date(data.nights[win[1]].day + 'T00:00:00');
-                const sameYear = a.getFullYear() === b.getFullYear();
-                const fa = a.toLocaleDateString('en', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
-                const fb = b.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
-                label = `${fa} – ${fb}`;
-              }
-              const tip = hovered
-                ? <>Press <strong>← →</strong> to jump to the previous or next night with data.</>
-                : <>Press <strong>← →</strong> to page the date range. Hover a night to step one date at a time instead.</>;
-              return (
-                <span className={s.stepWrap}>
-                  <DateStepper label={label} sub={sub} onPrev={stepLeft} onNext={stepRight}
-                    labelRef={pickBtnRef} onLabel={openPick}
-                    onHoverOpen={openPick} onHoverClose={closePickSoon}
-                    canPrev={canPrev} canNext={canNext} />
-                  {pick && <RangePicker min={firstDay} max={lastDay} init={pick} anchorRef={pickBtnRef}
-                    onApply={applyPick} activeRange={range} activeGran={gran}
-                    onGran={g => { applyGran(g); setPick(null); }} onRange={(k, d) => { applyRange(k, d); setPick(null); }}
-                    onMouseEnter={openPick} onMouseLeave={closePickSoon} hint={tip}
-                    brush={<div className={s.pickBrush}><Navigator nights={data.nights} win={win} onWin={changeWin} /></div>} />}
-                </span>
-              );
-            })()}
+            {win && data.nights.length > 0 && (
+              <HeaderSelector nights={data.nights} win={win} reachable={reachable} stepUnit={stepUnit}
+                pickBtnRef={pickBtnRef} openPick={openPick} closePickSoon={closePickSoon}
+                pick={pick} setPick={setPick} firstDay={firstDay} lastDay={lastDay}
+                applyPick={applyPick} range={range} gran={gran} applyGran={applyGran}
+                applyRange={applyRange} changeWin={changeWin} />
+            )}
             {tuneEnabled && (
               <div className={s.chips}>
                 <button className={`${s.chip} ${s.tunerToggle} ${tuner ? s.chipActive : ''}`}
@@ -485,7 +531,7 @@ export default function Sleep() {
               { glyph: 'square', color: STAGE.rem, label: 'REM', tip: <><strong>REM</strong>, the dreaming stage. Tends to cluster toward morning.</> },
               { glyph: 'square', color: STAGE.awake, label: 'Awake', tip: <>Moments you woke up during the night.</> },
             ]} /></div>
-          {win && <Skyline nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} fill section="timing" />}
+          {win && <Skyline nights={data.nights} win={win} onHover={publishHover} onOpen={setOpenIdx} targets={targets} padL={padL} fill section="timing" />}
         </div>
       </div>
 
@@ -501,7 +547,7 @@ export default function Sleep() {
             { glyph: 'square', color: INBED_PRE, label: 'In bed · pre', tip: <>Time in bed <strong>before</strong> you fell asleep{coverage.inbed ? ` (${coverage.inbed})` : ''}. Faded cap below the stack.</> },
             { glyph: 'square', color: INBED_POST, label: 'In bed · post', tip: <>Time in bed <strong>after</strong> you woke{coverage.inbed ? ` (${coverage.inbed})` : ''}. Faded cap above the stack.</> },
           ]} /></div>
-        {win && <Composition nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="stages" />}
+        {win && <Composition nights={data.nights} win={win} onHover={publishHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="stages" />}
       </div>
 
       <div className={s.block} data-section="consistency">
@@ -512,8 +558,8 @@ export default function Sleep() {
             { glyph: 'linedot', color: WAKE_TGT, label: 'Wake vs target', tip: <>How many minutes your <strong>wake time</strong> ran off target. One dot per night; line is the 14-night average.</> },
             { glyph: 'bar', color: DAYLIGHT, label: 'Daylight (prev day)', tip: <><strong>Time in daylight</strong> (min) the day <strong>before</strong> this night, which feeds into your body clock and bedtime. Watch-only, so a low bar can also mean the Watch was off your wrist.</> },
           ]} /></div>
-        {win && <Consistency nights={data.nights} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="consistency" />}
-        {win && series && <div className={s.subChart}><SubLabel label="Time in daylight (previous day)" tip={<><strong>Time in daylight</strong> (min) racked up the day <strong>before</strong> each night, so it lines up as the daytime that leads into that evening's bedtime. Watch-only{coverage.daylightStart ? ` (from ${coverage.daylightStart})` : ''}; a low bar can mean little daylight <strong>or</strong> that the Watch was off.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => daylightByDay[data.nights[i].day] ?? null} color={DAYLIGHT} unit="min" label="Time in daylight (previous day)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="consistency" /></div>}
+        {win && <Consistency nights={data.nights} win={win} onHover={publishHover} onOpen={setOpenIdx} targets={targets} padL={padL} section="consistency" />}
+        {win && series && <div className={s.subChart}><SubLabel label="Time in daylight (previous day)" tip={<><strong>Time in daylight</strong> (min) racked up the day <strong>before</strong> each night, so it lines up as the daytime that leads into that evening's bedtime. Watch-only{coverage.daylightStart ? ` (from ${coverage.daylightStart})` : ''}; a low bar can mean little daylight <strong>or</strong> that the Watch was off.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => daylightByDay[data.nights[i].day] ?? null} color={DAYLIGHT} unit="min" label="Time in daylight (previous day)" type="bars" onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="consistency" /></div>}
       </div>
 
       <div className={s.block} data-section="recovery">
@@ -526,9 +572,9 @@ export default function Sleep() {
             { glyph: 'bubble', color: RHR, label: 'Following-day RHR', tip: <>Apple's <strong>resting HR</strong> the day <strong>after</strong> each night (bpm). Bubble <strong>area</strong> scales with the value across the window. A rising resting HR points to poor recovery.</> },
             { glyph: 'bar', color: LOAD, label: 'Training load', tip: <><strong>Active energy</strong> burned that day (kcal), drawn as bars.</> },
           ]} /></div>
-        {win && <div className={s.subChart}><SubLabel label="Naps & sleep debt" tip={<>Two series meeting at a zero line. <strong>Nap length</strong> rises above it (brighter if the nap followed a sleep deficit); <strong>sleep debt</strong> — how far the last 3 nights fell under 7h — hangs below.</>} /><NapsPanel nights={data.nights} napDays={napDays} win={win} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="The morning after" tip={<>How your body looked the next day. <strong>Next-day HRV</strong> (ms) as box-plots — box is the middle 50%, whiskers are min–max, tick is the median — with <strong>next-day resting HR</strong> (bpm) as the bubble lane beneath (bubble <strong>area</strong> scales with the value across the window). A rough night usually <strong>drops</strong> HRV and <strong>raises</strong> resting HR.</>} /><NextDayCombo nights={data.nights} win={win} hrvByDay={nextHrvByDay} rhrByDay={followRhrByDay} hrvColor={HRV} rhrColor={RHR} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Training load (active energy)" tip={<>Daily <strong>active energy</strong> burned (kcal) as bars, a stand-in for <strong>training load</strong>. A heavy day can eat into the next night's recovery.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => byDay.load[data.nights[i].day] ?? null} color={LOAD} unit="kcal" label="Training load (active energy)" type="bars" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
+        {win && <div className={s.subChart}><SubLabel label="Naps & sleep debt" tip={<>Two series meeting at a zero line. <strong>Nap length</strong> rises above it (brighter if the nap followed a sleep deficit); <strong>sleep debt</strong> — how far the last 3 nights fell under 7h — hangs below.</>} /><NapsPanel nights={data.nights} napDays={napDays} win={win} onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="The morning after" tip={<>How your body looked the next day. <strong>Next-day HRV</strong> (ms) as box-plots — box is the middle 50%, whiskers are min–max, tick is the median — with <strong>next-day resting HR</strong> (bpm) as the bubble lane beneath (bubble <strong>area</strong> scales with the value across the window). A rough night usually <strong>drops</strong> HRV and <strong>raises</strong> resting HR.</>} /><NextDayCombo nights={data.nights} win={win} hrvByDay={nextHrvByDay} rhrByDay={followRhrByDay} hrvColor={HRV} rhrColor={RHR} onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Training load (active energy)" tip={<>Daily <strong>active energy</strong> burned (kcal) as bars, a stand-in for <strong>training load</strong>. A heavy day can eat into the next night's recovery.</>} /><MiniChart nights={data.nights} win={win} valueAt={i => byDay.load[data.nights[i].day] ?? null} color={LOAD} unit="kcal" label="Training load (active energy)" type="bars" onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="recovery" /></div>}
       </div>
 
       <div className={s.block} data-section="respiration">
@@ -541,8 +587,8 @@ export default function Sleep() {
             { glyph: 'bubble', color: FULLWAKE, label: 'Full wake mins', tip: <>Total minutes awake in stretches of <strong>10 min or more</strong>. Bigger bubble means more time awake.</> },
             { glyph: 'box', color: SPO2, label: 'SpO₂', tip: <>Overnight <strong>blood-oxygen %</strong>. Box is the middle 50%, whiskers are min–max, tick is the median.</> },
           ]} /></div>
-        {win && series && <div className={s.subChart}><SubLabel label="Respiratory rate" tip={<>Each night's <strong>breathing rate</strong> (breaths/min) as a box-plot — <strong>box</strong> is the middle 50%, <strong>whiskers</strong> are min–max, <strong>tick</strong> is the median. The lanes below size their <strong>bubbles</strong> by breathing disturbances, brief wake-ups under 10 min, and total minutes awake in longer stretches.</>} /><RespirationChart nights={data.nights} win={win} respBy={byDay.resp} hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="respiration" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Blood oxygen (SpO₂)" tip={<>Each night's <strong>blood-oxygen %</strong> as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. Only the nights the Watch or iPhone logged SpO₂, so it's patchy{coverage.spo2End ? ` (ends ${coverage.spo2End})` : ''}.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.spo2} color={SPO2} unit="%" label="Blood oxygen (SpO₂)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} H={120} padL={padL} section="respiration" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Respiratory rate" tip={<>Each night's <strong>breathing rate</strong> (breaths/min) as a box-plot — <strong>box</strong> is the middle 50%, <strong>whiskers</strong> are min–max, <strong>tick</strong> is the median. The lanes below size their <strong>bubbles</strong> by breathing disturbances, brief wake-ups under 10 min, and total minutes awake in longer stretches.</>} /><RespirationChart nights={data.nights} win={win} respBy={byDay.resp} onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="respiration" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Blood oxygen (SpO₂)" tip={<>Each night's <strong>blood-oxygen %</strong> as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. Only the nights the Watch or iPhone logged SpO₂, so it's patchy{coverage.spo2End ? ` (ends ${coverage.spo2End})` : ''}.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.spo2} color={SPO2} unit="%" label="Blood oxygen (SpO₂)" onHover={publishHover} onOpen={setOpenIdx} H={120} padL={padL} section="respiration" /></div>}
       </div>
 
       <div className={s.block} data-section="heart">
@@ -552,135 +598,13 @@ export default function Sleep() {
             { glyph: 'box', color: HR, label: 'Sleeping HR', tip: <>Overnight <strong>heart rate</strong> (bpm). Box is the middle 50%, whiskers are min–max, tick is the median. Lower means better recovery.</> },
             { glyph: 'box', color: HRV, label: 'Overnight HRV', tip: <>Overnight <strong>HRV</strong> (SDNN, ms) — the beat-to-beat variation in your heart rate. Box is the middle 50%, whiskers are min–max, tick is the median. Higher means better recovery.</> },
           ]} /></div>
-        {win && series && <div className={s.subChart}><SubLabel label="Sleeping heart rate" tip={<>Each night's <strong>heart rate</strong> (bpm) as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. A <strong>lower</strong> sleeping HR usually means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hr} color={HR} unit="bpm" label="Sleeping heart rate" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
-        {win && series && <div className={s.subChart}><SubLabel label="Overnight HRV (SDNN)" tip={<>Each night's <strong>heart-rate variability</strong> (SDNN, ms) as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. <strong>Higher</strong> HRV usually means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hrv} color={HRV} unit="ms" label="Overnight HRV (SDNN)" hover={hover?.i ?? null} onHover={setHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Sleeping heart rate" tip={<>Each night's <strong>heart rate</strong> (bpm) as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. A <strong>lower</strong> sleeping HR usually means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hr} color={HR} unit="bpm" label="Sleeping heart rate" onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
+        {win && series && <div className={s.subChart}><SubLabel label="Overnight HRV (SDNN)" tip={<>Each night's <strong>heart-rate variability</strong> (SDNN, ms) as a box-plot — box is the middle 50%, whiskers are min–max, tick is the median. <strong>Higher</strong> HRV usually means better recovery.</>} /><BoxSeries nights={data.nights} win={win} byDay={byDay.hrv} color={HRV} unit="ms" label="Overnight HRV (SDNN)" onHover={publishHover} onOpen={setOpenIdx} padL={padL} section="heart" /></div>}
       </div>
       </div>
 
-      {hover?.i != null && data.nights[hover.i]?.blank && (
-        <div ref={tipRef} className={`${s.tip} ${s.tipBlank}`} style={{ left: hover.cx + 14, top: hover.cy + 14 }}>
-          <b className={s.tipHead}>{new Date(data.nights[hover.i].day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: '2-digit' })}</b>
-          <div className={s.tipRow}><span style={{ color: 'var(--dim)' }}>no data</span></div>
-        </div>
-      )}
-
-      {hover?.i != null && data.nights[hover.i] && !data.nights[hover.i].blank && (() => {
-        const i = hover.i, d = data.nights[i], naps = napByDay[d.day] || [];
-        const hrB = byDay.hr[d.day], hrvB = byDay.hrv[d.day], tib = (d.tibBefore || 0) + (d.tibAfter || 0);
-        // Same derivations the modal's `extra` uses: 3-night rolling debt under 7h,
-        // and the following night's overnight HRV median.
-        let sum = 0, cnt = 0;
-        for (const j of [i - 2, i - 1, i]) { const a = data.nights[j]?.asleepEff; if (a != null) { sum += Math.max(0, 420 - a); cnt++; } }
-        const debt = cnt ? sum / cnt : 0;
-        const nextHrv = byDay.hrv[data.nights[i + 1]?.day]?.med;
-        const followRhr = followRhrByDay[d.day];
-        const daylight = daylightByDay[d.day];
-        const load = byDay.load[d.day];
-        const bedD = d.bed - targets.bedMin, wakeD = d.wake - targets.wakeMin;
-        const sgn = m => (m > 0 ? '+' : '') + Math.round(m);
-        const sec = hover.section;
-        // Emphasis, not hiding: the group matching the hovered chart gets a lighter
-        // bounding box; the rest stay fully readable. The "When You Slept" skyline
-        // (section 'timing') encodes BOTH stage colors and clock timing, so it lights
-        // both the stages and timing groups.
-        const stagesHot = sec === 'stages' || sec === 'timing';
-        const timingHot = sec === 'timing' || sec === 'consistency';
-        const grp = id => `${s.tipGroup}${sec === id ? ' ' + s.tipGroupHot : ''}`;
-        const grpIf = hot => `${s.tipGroup}${hot ? ' ' + s.tipGroupHot : ''}`;
-        // Per-stage spark swimlane: a tiny inline lane spanning bed→wake with this
-        // stage's segments drawn as rects at their a→b positions.
-        const span = Math.max(d.wake - d.bed, 1);
-        const spark = st => {
-          const segs = (d.segs || []).filter(g => g.st === st);
-          const W = 96, H = 9;
-          return (
-            <svg className={s.tipStageSpark} width={W} height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-              <rect x={0} y={0} width={W} height={H} fill="var(--panel)" opacity={0.5} />
-              {segs.map((g, j) => {
-                const x = ((g.a - d.bed) / span) * W;
-                const w = Math.max(((g.b - g.a) / span) * W, 0.6);
-                return <rect key={j} x={x} y={0} width={w} height={H} fill={STAGE[st]} opacity={0.9} />;
-              })}
-            </svg>
-          );
-        };
-        const stageRow = st => (
-          <div className={s.tipStageRow}>
-            <span className={s.tipStageName}><span className={s.tipDot} style={{ background: STAGE[st] }} />{st}</span>
-            {spark(st)}
-            <span className={s.tipStageTime}>{hm(d[st])}</span>
-          </div>
-        );
-        const timingGroup = (
-          <div className={grpIf(timingHot)}>
-            <div className={s.tipGroupLabel}>timing</div>
-            <div className={s.tipRow}><span>bed</span><span>{clock(d.bed)}</span></div>
-            <div className={s.tipRow}><span>wake</span><span>{clock(d.wake)}</span></div>
-            {tib > 0 && <div className={s.tipRow}><span>in bed before/after</span><span>{d.tibBefore}m / {d.tibAfter}m</span></div>}
-            <div className={s.tipRow}><span>bed vs target</span><span>{sgn(bedD)}m</span></div>
-            <div className={s.tipRow}><span>wake vs target</span><span>{sgn(wakeD)}m</span></div>
-            {daylight != null && <div className={s.tipRow}><span>daylight (prev day)</span><span>{hm(daylight)}</span></div>}
-          </div>
-        );
-        const respGroup = (d.resp || d.spo2 || d.dist != null) && (
-          <div className={grp('respiration')}>
-            <div className={s.tipGroupLabel}>respiration</div>
-            {d.resp && <div className={s.tipRow}><span>resp rate</span><span>{d.resp.toFixed(1)} br/min</span></div>}
-            <div className={s.tipRow}><span>SpO₂</span><span>{d.spo2 ? `${d.spo2.toFixed(0)}%` : '—'}</span></div>
-            {d.dist != null && <div className={s.tipRow}><span>breathing dist.</span><span>{d.dist.toFixed(1)}</span></div>}
-            <div className={s.tipRow}><span>wakes (brief/full)</span><span>{d.briefWakes} / {d.wakeCount}</span></div>
-            {d.fullWakeMin > 0 && <div className={s.tipRow}><span>full wake mins</span><span>{hm(d.fullWakeMin)}</span></div>}
-          </div>
-        );
-        const heartGroup = (hrB || hrvB) && (
-          <div className={grp('heart')}>
-            <div className={s.tipGroupLabel}>heart rate</div>
-            {hrB && <div className={s.tipRow}><span>sleeping HR</span><span>{hrB.med} · {hrB.lo}–{hrB.hi}</span></div>}
-            {hrvB && <div className={s.tipRow}><span>overnight HRV</span><span>{hrvB.med} ms</span></div>}
-          </div>
-        );
-        const recoveryGroup = (naps.length > 0 || debt > 0.5 || nextHrv != null || followRhr != null || load != null) && (
-          <div className={grp('recovery')}>
-            <div className={s.tipGroupLabel}>recovery</div>
-            {naps.length > 0 && <div className={s.tipRow}><span>{naps.length > 1 ? 'naps' : 'nap'}</span><span>{naps.map(p => hm(p.asleep)).join(', ')}</span></div>}
-            {debt > 0.5 && <div className={s.tipRow}><span>sleep debt</span><span>{hm(debt)}</span></div>}
-            {nextHrv != null && <div className={s.tipRow}><span>next-day HRV</span><span>{nextHrv} ms</span></div>}
-            {followRhr != null && <div className={s.tipRow}><span>next-day RHR</span><span>{followRhr} bpm</span></div>}
-            {load != null && <div className={s.tipRow}><span>training load</span><span>{Math.round(load).toLocaleString()} kcal</span></div>}
-          </div>
-        );
-        return (
-          <div ref={tipRef} className={s.tip} style={{ left: hover.cx + 14, top: hover.cy + 14 }}>
-            <div className={s.tipHeadRow}>
-              <b className={s.tipHead}>{new Date(d.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: '2-digit' })}</b>
-              <span className={s.tipSourceTop}>{srcLabel(d.source)}</span>
-            </div>
-            <div className={s.tipHero}>
-              <span><span className={s.tipHeroVal}>{hm(d.asleepEff)}</span><span className={s.tipHeroLbl}>asleep</span></span>
-              <span><span className={s.tipHeroVal}>{d.eff == null ? '—' : `${d.eff}%`}</span><span className={s.tipHeroLbl}>efficiency</span></span>
-            </div>
-
-            <div className={`${grpIf(stagesHot)} ${s.tipStages}`}>
-              <div className={s.tipGroupLabel}>stages</div>
-              {stageRow('deep')}
-              {stageRow('core')}
-              {stageRow('rem')}
-              {stageRow('awake')}
-            </div>
-
-            <div className={s.tipGrid}>
-              <div className={s.tipCol}>
-                {timingGroup}
-                {heartGroup}
-              </div>
-              <div className={s.tipCol}>
-                {respGroup}
-                {recoveryGroup}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <HoverTooltip nights={data.nights} win={win} byDay={byDay} napByDay={napByDay}
+        followRhrByDay={followRhrByDay} daylightByDay={daylightByDay} targets={targets} />
 
       {openIdx != null && data.nights[openIdx] && !data.nights[openIdx].blank && (() => {
         const i = openIdx, d = data.nights[i];

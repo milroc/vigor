@@ -10,9 +10,15 @@ export const PAD_R = 0;    // widest y-axis label present in the data and shared
 // engine (IBM Plex Mono), matching how the axis labels actually render — a canvas
 // measureText silently falls back to a narrower generic font and under-measures.
 export let _measSvg, _measText;
+// getComputedTextLength() forces a synchronous layout, and the axis code asks for
+// the same handful of labels on every hover — so results are cached by text+size.
+const _measCache = new Map();
 export function labelWidth(str, px = 10) {
   const t = String(str);
   if (typeof document === 'undefined') return t.length * px * 0.6;
+  const key = `${px}|${t}`;
+  const hit = _measCache.get(key);
+  if (hit !== undefined) return hit;
   if (!_measSvg) {
     _measSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     _measSvg.setAttribute('style', 'position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden');
@@ -23,8 +29,13 @@ export function labelWidth(str, px = 10) {
   }
   _measText.style.fontSize = `${px}px`;
   _measText.textContent = t;
-  return _measText.getComputedTextLength();
+  const width = _measText.getComputedTextLength();
+  _measCache.set(key, width);
+  return width;
 }
+// Web fonts land after first paint, so widths measured against the fallback are
+// stale; Sleep clears the cache once document.fonts is ready.
+export const clearLabelWidthCache = () => _measCache.clear();
 export const srcLabel = src => !src ? '—' : /watch/i.test(src) ? 'Apple Watch' : /iphone/i.test(src) ? 'iPhone' : /withings/i.test(src) ? 'Withings' : src;
 export const CAP_MIN = 600; // stage-composition y-axis caps at 10h; longer nights overflow
 export const RANGES = [['90d', 90], ['1yr', 365], ['All', null]];

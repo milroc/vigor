@@ -34,7 +34,7 @@
   --tgt-bed: #7d8bd4;
   --tgt-wake: #f5a623;
   /* Stage Composition mute — a filter() the tuner pulls down; default = no-op. */
-  --comp-mute: saturate(1) brightness(1);
+  --comp-mute: none;   /* identity filters still allocate a filter surface; the tuner overrides this */
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
