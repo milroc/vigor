@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef, useMemo } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { BED_TGT, DEBT, DIST, FULLWAKE, HR, HRV, INBED_POST, INBED_PRE, NAP, RESP, RHR, STAGE, WAKE_TGT } from './palette.js';
 import { CAP_MIN, PAD_L, PAD_R, clamp, clock, labelWidth, niceTicks, pctl, timeTicks, useMeasure } from './helpers.js';
-import { getHover, subscribeHover } from './hoverStore.js';
+import { useHoverStore, useHoverTarget } from './hoverStore.jsx';
 import s from '../Sleep.module.css';
 
 // ---- The hovered-column band. It used to be a <rect> inside each chart's SVG,
@@ -11,19 +11,23 @@ import s from '../Sleep.module.css';
 // never touched, so their rasters stay cached and hover costs nothing to paint. ----
 function HoverBand({ lo, hi, cw, padL, top, height, alpha = 0.13, ready }) {
   const ref = useRef(null);
-  useEffect(() => {
+  const store = useHoverStore();
+  // Layout effect, not passive: a window change re-renders the chart with new
+  // column geometry, and a passive effect can run after the browser has already
+  // painted — leaving the band at the previous width and offset for a frame.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const apply = h => {
-      const i = h?.i;
+    el.style.width = `${cw}px`;   // constant for a given window; only transform moves per frame
+    const apply = () => {
+      const i = store.getHover()?.i;
       if (!ready || i == null || i < lo || i > hi) { el.style.opacity = '0'; return; }
       el.style.opacity = String(alpha);
-      el.style.width = `${cw}px`;
       el.style.transform = `translate3d(${padL + (i - lo) * cw}px, 0, 0)`;
     };
-    apply(getHover());
-    return subscribeHover(apply);
-  }, [lo, hi, cw, padL, alpha, ready]);
+    apply();
+    return store.subscribe(apply);
+  }, [store, lo, hi, cw, padL, alpha, ready]);
   return <div ref={ref} className={s.hoverBand} style={{ top, height }} aria-hidden="true" />;
 }
 
@@ -31,7 +35,7 @@ function HoverBand({ lo, hi, cw, padL, top, height, alpha = 0.13, ready }) {
 // bed→wake band) with a draggable window: drag an edge to move start/end, drag
 // inside to pan, drag empty space to draw a new window. ----
 export const GRIP = 6;
-export function Navigator({ nights, win, onWin }) {
+export const Navigator = memo(function Navigator({ nights, win, onWin }) {
   const [ref, w] = useMeasure();
   const H = 44, PAD = { t: 4, r: 6, b: 4, l: 6 };
   const drag = useRef(null);
@@ -100,7 +104,7 @@ export function Navigator({ nights, win, onWin }) {
       )}
     </div>
   );
-}
+});
 
 // ---- Stage Composition: per-night stacked stage minutes over the selected
 // window. Fixed 10h ceiling; longer nights overflow the top. ----
@@ -193,58 +197,46 @@ export const Composition = memo(function Composition({ nights, win, onHover, onO
 // ---- Skyline's date axis. Split out of the main SVG into its own small overlay
 // so the hovered-date label and the fading month ticks can update without
 // invalidating the 23k-mark skyline behind them. ----
-const SkylineAxis = memo(function SkylineAxis({ nights, lo, hi, cw, padL, w, plotW, H }) {
+const SkylineAxis = memo(function SkylineAxis({ nights, lo, hi, cw, padL, w, plotW }) {
   const AX = 18;
+  const { i } = useHoverTarget();
   const ticks = useMemo(
     () => timeTicks(nights, lo, hi, plotW).map(t => ({ ...t, x: padL + (t.i - lo) * cw, lw: labelWidth(t.lbl, 10) })),
     [nights, lo, hi, cw, padL, plotW]);
-  const tickRefs = useRef([]);
-  const labRef = useRef(null);
-  useEffect(() => {
-    const apply = h => {
-      const i = h?.i;
-      const lab = labRef.current;
-      const hot = i != null && i >= lo && i <= hi && nights[i];
-      if (!hot) {
-        tickRefs.current.forEach(el => { if (el) el.style.opacity = '1'; });
-        if (lab) lab.style.display = 'none';
-        return;
-      }
-      const n = nights[i];
-      const dateStr = new Date(n.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-        + (n.blank ? ' · no data' : '');
-      const lw = labelWidth(dateStr, 10), hw = lw / 2;
-      const cxAnchor = padL + (i - lo) * cw + cw / 2;
-      const leftEdge = padL, rightEdge = w - PAD_R;
-      let labelX, anchor, labelCenter;
-      if (cxAnchor - hw < leftEdge) { anchor = 'start'; labelX = leftEdge; labelCenter = leftEdge + hw; }
-      else if (cxAnchor + hw > rightEdge) { anchor = 'end'; labelX = rightEdge; labelCenter = rightEdge - hw; }
-      else { anchor = 'middle'; labelX = cxAnchor; labelCenter = cxAnchor; }
-      if (lab) {
-        lab.style.display = '';
-        lab.textContent = dateStr;
-        lab.setAttribute('x', labelX);
-        lab.setAttribute('text-anchor', anchor);
-      }
-      const hideR = hw + 16, showR = hw + 44;
-      tickRefs.current.forEach((el, k) => {
-        if (!el) return;
-        const t = ticks[k];
-        el.style.opacity = String(clamp((Math.abs(t.x + t.lw / 2 - labelCenter) - hideR) / (showR - hideR), 0, 1));
-      });
-    };
-    apply(getHover());
-    return subscribeHover(apply);
-  }, [ticks, nights, lo, hi, cw, padL, w]);
+
+  // Edge-aware date label: centered under the hovered column when there is room,
+  // otherwise pinned to whichever edge it would have clipped past, so the whole
+  // label (including "· no data") stays on screen.
+  const label = useMemo(() => {
+    const n = i != null && i >= lo && i <= hi ? nights[i] : null;
+    if (!n) return null;
+    const text = new Date(n.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+      + (n.blank ? ' · no data' : '');
+    const hw = labelWidth(text, 10) / 2;
+    const cxAnchor = padL + (i - lo) * cw + cw / 2;
+    const leftEdge = padL, rightEdge = w - PAD_R;
+    if (cxAnchor - hw < leftEdge) return { text, hw, x: leftEdge, anchor: 'start', center: leftEdge + hw };
+    if (cxAnchor + hw > rightEdge) return { text, hw, x: rightEdge, anchor: 'end', center: rightEdge - hw };
+    return { text, hw, x: cxAnchor, anchor: 'middle', center: cxAnchor };
+  }, [i, nights, lo, hi, cw, padL, w]);
 
   if (!w) return null;
+  // Ticks the focused-date label would collide with fade out (and back in) as you
+  // hover. This is an ordinary render: the paint win came from the axis being its
+  // own <svg> root beside the 23k-mark skyline, not from writing attributes by
+  // hand, so React patching ~13 elements costs the same invalidation and keeps
+  // the DOM honest.
+  const hideR = label ? label.hw + 16 : 0, showR = label ? label.hw + 44 : 1;
   return (
-    <svg className={`${s.svg} ${s.skyAxis}`} width="100%" height={AX} viewBox={`0 0 ${w} ${AX}`} preserveAspectRatio="none" aria-hidden="true">
-      {ticks.map((t, k) => (
-        <text key={t.i} ref={el => { tickRefs.current[k] = el; }} x={t.x} y={AX - 5} fill="var(--dim)" fontSize="10"
+    <svg className={`${s.svg} ${s.skyAxis}`} width="100%" height={AX} viewBox={`0 0 ${w} ${AX}`} preserveAspectRatio="none">
+      {ticks.map(t => (
+        <text key={t.i} x={t.x} y={AX - 5} fill="var(--dim)" fontSize="10"
+          opacity={label ? clamp((Math.abs(t.x + t.lw / 2 - label.center) - hideR) / (showR - hideR), 0, 1) : 1}
           style={{ transition: 'opacity 0.18s ease' }}>{t.lbl}</text>
       ))}
-      <text ref={labRef} y={AX - 5} fill="var(--lime)" fontSize="10" fontWeight="600" style={{ display: 'none' }} />
+      {label && (
+        <text x={label.x} y={AX - 5} fill="var(--lime)" fontSize="10" fontWeight="600" textAnchor={label.anchor}>{label.text}</text>
+      )}
     </svg>
   );
 });
@@ -338,7 +330,7 @@ export const Skyline = memo(function Skyline({ nights, win, onHover, onOpen, tar
       )}
       {/* Cubism-style axis: month ticks stay put, but any tick the focused-date
           label would overlap fades out (and back in) gracefully as you hover. */}
-      <SkylineAxis nights={nights} lo={lo} hi={hi} cw={cw} padL={PAD.l} w={w} plotW={plotW} H={H} />
+      <SkylineAxis nights={nights} lo={lo} hi={hi} cw={cw} padL={PAD.l} w={w} plotW={plotW} />
       <HoverBand lo={lo} hi={hi} cw={cw} padL={PAD.l} top={PAD.t} height={plotH} alpha={0.13} ready={w > 0} />
     </div>
   );

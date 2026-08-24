@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { getHealthSleep, getHealthSleepSeries, getHealthSleepNight } from '../api.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getHealthSleep, getHealthSleepSeries } from '../api.js';
 import shared from '../styles/shared.module.css';
 import s from './Sleep.module.css';
 import {
@@ -9,7 +9,7 @@ import {
 import TunerPanel from './sleep/TunerPanel.jsx';
 
 import { PAD_R, labelWidth, clearLabelWidthCache, srcLabel, clamp, clock, hm, fmtMon, fmtDay, fillNightGaps, std } from './sleep/helpers.js';
-import { getHover, setHover, subscribeHover, useHoverTarget } from './sleep/hoverStore.js';
+import { HoverProvider, useHoverStore, useHoverTarget } from './sleep/hoverStore.jsx';
 import { HoverTooltip } from './sleep/HoverTooltip.jsx';
 import { InfoTip, DateStepper, RangePicker } from './sleep/pickers.jsx';
 import { Legend, SubLabel } from './sleep/Legend.jsx';
@@ -27,7 +27,9 @@ const yrRange = (a, b) => !a ? null : a.slice(0, 4) === b.slice(0, 4) ? a.slice(
 function HeaderSelector({ nights, win, reachable, stepUnit, pickBtnRef, openPick, closePickSoon,
   pick, setPick, firstDay, lastDay, applyPick, range, gran, applyGran, applyRange, changeWin }) {
   const { i } = useHoverTarget();
-  const hovered = i != null && nights[i];
+  // A hover published a frame before the window changed can name a night that is
+  // no longer on screen; the column bands already ignore those, so ignore them here.
+  const hovered = i != null && i >= win[0] && i <= win[1] && nights[i];
   let label;
   if (hovered) {
     label = new Date(nights[i].day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
@@ -58,6 +60,11 @@ function HeaderSelector({ nights, win, reachable, stepUnit, pickBtnRef, openPick
 }
 
 export default function Sleep() {
+  return <HoverProvider><SleepView /></HoverProvider>;
+}
+
+function SleepView() {
+  const store = useHoverStore();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [win, setWin] = useState(null);
@@ -293,7 +300,7 @@ export default function Sleep() {
       window.removeEventListener('scroll', invalidateRects, true);
     };
   }, []);
-  useEffect(invalidateRects, [win, padL, data, series, openIdx, pick, tuner]);
+  useEffect(invalidateRects, [win, padL, data, series, openIdx, pick, tuner, fontsReady, nux]);
   const geom = () => {
     if (!rects.current && scrollRef.current) {
       rects.current = {
@@ -307,11 +314,13 @@ export default function Sleep() {
   // Pointer moves arrive faster than a frame; only the last one in a frame can
   // matter, so they're coalesced into a single rAF-published hover update.
   const hoverRaf = useRef(0), hoverNext = useRef(null);
-  const publishHover = h => {
+  // Stable identity: every chart is memo()'d on it, so an inline arrow here would
+  // silently defeat all of them.
+  const publishHover = useCallback(h => {
     hoverNext.current = h;
     if (hoverRaf.current) return;
-    hoverRaf.current = requestAnimationFrame(() => { hoverRaf.current = 0; setHover(hoverNext.current); });
-  };
+    hoverRaf.current = requestAnimationFrame(() => { hoverRaf.current = 0; store.setHover(hoverNext.current); });
+  }, [store]);
   useEffect(() => () => { if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current); }, []);
 
   const onXHover = e => {
@@ -356,7 +365,7 @@ export default function Sleep() {
   // the arrow keys and the date stepper. Recomputes cx/cy from the same geometry
   // the hover surface uses so the tooltip stays anchored to the new column.
   const stepHover = dir => {
-    const hover = getHover();
+    const hover = store.getHover();
     if (!win || hover?.i == null || !data) return;
     const [lo, hi] = win;
     let j = hover.i + dir;
@@ -369,7 +378,7 @@ export default function Sleep() {
       const cw = (r.width - padL - PAD_R) / (hi - lo + 1);
       if (cw > 0) cx = r.left + padL + (j - lo + 0.5) * cw;
     }
-    setHover({ i: j, cx, cy, section: hover.section });
+    store.setHover({ i: j, cx, cy, section: hover.section });
   };
 
   // No-hover mode: page the visible window left/right by its own span, keeping
@@ -421,7 +430,7 @@ export default function Sleep() {
       if (openIdx != null) return;
       if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
       const dir = e.key === 'ArrowRight' ? 1 : -1;
-      if (getHover()?.i != null) { e.preventDefault(); stepHover(dir); }
+      if (store.getHover()?.i != null) { e.preventDefault(); stepHover(dir); }
       else if (win) { e.preventDefault(); gran ? stepGran(dir) : pageWin(dir); }
     };
     window.addEventListener('keydown', onKey);
@@ -594,7 +603,7 @@ export default function Sleep() {
       </div>
       </div>
 
-      <HoverTooltip nights={data.nights} byDay={byDay} napByDay={napByDay}
+      <HoverTooltip nights={data.nights} win={win} byDay={byDay} napByDay={napByDay}
         followRhrByDay={followRhrByDay} daylightByDay={daylightByDay} targets={targets} />
 
       {openIdx != null && data.nights[openIdx] && !data.nights[openIdx].blank && (() => {

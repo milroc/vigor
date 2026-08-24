@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { getHealthSleepNight } from '../../api.js';
 import { HR, HRV, INBED_POST, INBED_PRE, RESP, SPO2, STAGE } from './palette.js';
 import { PAD_R, clamp, clock, hm, labelWidth, srcLabel, useMeasure } from './helpers.js';
 import { NightDatePicker } from './pickers.jsx';
@@ -231,7 +233,9 @@ export function NightModal({ night, naps, extra = {}, onClose, onStep, onPickDat
   }, [onClose, onStep, picking]);
 
   const title = new Date(night.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  return (
+  // position:fixed overlay — portaled for the same reason as the day tooltip:
+  // it must not depend on no ancestor ever becoming a containing block.
+  return createPortal((
     <div className={s.modalOverlay} onClick={onClose}>
       <section className={s.modal} onClick={e => e.stopPropagation()}>
         <div className={s.modalHead}>
@@ -293,7 +297,5 @@ export function NightModal({ night, naps, extra = {}, onClose, onStep, onPickDat
         <div className={s.modalStepHint}>Press ← → to move between nights</div>
       </section>
     </div>
-  );
+  ), document.body);
 }
-
-

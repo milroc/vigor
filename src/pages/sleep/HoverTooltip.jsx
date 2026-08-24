@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { STAGE } from './palette.js';
 import { clock, hm, srcLabel } from './helpers.js';
-import { getHover, subscribeHover, useHoverTarget } from './hoverStore.js';
+import { useHoverStore, useHoverTarget } from './hoverStore.jsx';
 import s from '../Sleep.module.css';
 
 // Keep the day tooltip fully on-screen: measure it and clamp against every
 // viewport edge — flip left/above when it would overflow right/bottom, clamp to
-// an 8px inset otherwise. The measured size is cached and only refreshed after a
-// render changes the content, so simply moving the cursor within one night's
-// column never forces a layout.
+// an 8px inset otherwise. The measured size is cached and only refreshed when the
+// box's row layout changes, so moving the cursor never forces a layout.
 const M = 8, GAP = 14;
 function place(el, h, size) {
   if (!el || !h || h.cx == null) return;
@@ -26,33 +26,62 @@ function place(el, h, size) {
 
 // The tooltip subscribes to hover itself rather than being rendered by Sleep, so
 // a pointer move re-renders this one small subtree instead of the whole page
-// (and every chart) — see hoverStore.js.
-export function HoverTooltip({ nights, byDay, napByDay, followRhrByDay, daylightByDay, targets }) {
+// (and every chart) — see hoverStore.jsx.
+//
+// Portaled to <body>: it is position:fixed and positions itself from viewport
+// coordinates, which silently breaks if any ancestor ever becomes a containing
+// block. Nothing in <main>'s chain does today, but adding contain or
+// content-visibility to the chart blocks — the obvious next optimization for
+// twelve stacked charts — would, and the failure would look like a positioning
+// bug far from its cause.
+export function HoverTooltip({ nights, win, byDay, napByDay, followRhrByDay, daylightByDay, targets }) {
   const ref = useRef(null);
   const size = useRef({ width: 0, height: 0 });
+  const shapeRef = useRef(null);
+  const store = useHoverStore();
   const { i, section } = useHoverTarget();
 
+  // A hover published a frame before the window changed can name an off-screen
+  // night; the column bands ignore those, so the tooltip must too.
+  const d = i != null && win && i >= win[0] && i <= win[1] ? nights[i] : null;
+
+  // getBoundingClientRect forces a synchronous layout of a document holding tens
+  // of thousands of nodes, and at the "All" range every pixel is a different
+  // night — so measuring per night would mean one forced layout per frame. The
+  // box has a locked width (see .tip), so only the row count can change its size:
+  // key the cached measurement on which optional rows are present and re-measure
+  // only when that shape changes.
+  const shape = !d ? null
+    : d.blank ? 'blank'
+      : [(d.tibBefore || 0) + (d.tibAfter || 0) > 0, daylightByDay[d.day] != null,
+        !!d.resp, d.dist != null, d.fullWakeMin > 0, !!(d.resp || d.spo2 || d.dist != null),
+        !!byDay.hr[d.day], !!byDay.hrv[d.day],
+        (napByDay[d.day] || []).length > 0, byDay.hrv[nights[i + 1]?.day]?.med != null,
+        followRhrByDay[d.day] != null, byDay.load[d.day] != null].map(Number).join('');
+
   // Cursor-only movement: reposition from the cached size, no React render.
-  useEffect(() => subscribeHover(h => place(ref.current, h, size.current)), []);
-  // Content changed: re-measure, then reposition.
+  useEffect(() => store.subscribe(() => place(ref.current, store.getHover(), size.current)), [store]);
+  // Content changed shape: re-measure, then reposition.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    size.current = { width: r.width, height: r.height };
-    place(el, getHover(), size.current);
-  });
+    if (shapeRef.current !== shape) {
+      const r = el.getBoundingClientRect();
+      size.current = { width: r.width, height: r.height };
+      shapeRef.current = shape;
+    }
+    place(el, store.getHover(), size.current);
+  }, [shape, store]);
 
-  const d = i == null ? null : nights[i];
   if (!d) return null;
 
   if (d.blank) {
-    return (
+    return createPortal((
       <div ref={ref} className={`${s.tip} ${s.tipBlank}`}>
         <b className={s.tipHead}>{new Date(d.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: '2-digit' })}</b>
         <div className={s.tipRow}><span style={{ color: 'var(--dim)' }}>no data</span></div>
       </div>
-    );
+    ), document.body);
   }
 
   const naps = napByDay[d.day] || [];
@@ -139,7 +168,7 @@ export function HoverTooltip({ nights, byDay, napByDay, followRhrByDay, daylight
       {load != null && <div className={s.tipRow}><span>training load</span><span>{Math.round(load).toLocaleString()} kcal</span></div>}
     </div>
   );
-  return (
+  return createPortal((
     <div ref={ref} className={s.tip}>
       <div className={s.tipHeadRow}>
         <b className={s.tipHead}>{new Date(d.day + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: '2-digit' })}</b>
@@ -169,5 +198,5 @@ export function HoverTooltip({ nights, byDay, napByDay, followRhrByDay, daylight
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
