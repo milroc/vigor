@@ -5,6 +5,7 @@
 // in localStorage; Copy exports the working palette as JS consts + a :root block.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TUNER_DEFAULTS, TUNER_LS, applyTunerState } from './palette.js';
+import { notifyPaletteChange } from './canvasLayer.jsx';
 import s from '../Sleep.module.css';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -87,6 +88,7 @@ export default function TunerPanel({ onClose }) {
       if (over[k]) root.style.setProperty(k, over[k]); else root.style.removeProperty(k);
     }
     root.style.setProperty('--comp-mute', `saturate(${mute.sat}) brightness(${mute.bri})`);
+    notifyPaletteChange();   // canvas marks hold resolved colors, so re-theming must redraw them
     try { localStorage.setItem(TUNER_LS, JSON.stringify({ over, ramp, mute })); } catch { /* ignore */ }
   }, [over, ramp, mute]);
 

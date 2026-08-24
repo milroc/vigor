@@ -289,6 +289,17 @@
   will-change: transform; contain: strict;
 }
 .skyAxis { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: none; }
+/* Per-night marks render to a canvas; the SVG keeps the axes, labels, target
+   markers and the pointer surface. The SVG stays in flow so it still sizes the
+   chart. */
+.marksLayer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+/* The axis SVG stays UNDER the marks, the way gridlines sat behind the bars when
+   both lived in one SVG. It still receives the pointer events — the canvas above
+   it is pointer-events:none, so hit testing falls straight through. */
+.chartWrap > svg { position: relative; z-index: 0; }
+.chartWrap > .goalLayer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.chartWrap > .skyAxis { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none; }
+.hoverBand { z-index: 4; }
 .inbedBand { opacity: 0.35; pointer-events: none; }
 .scrub { cursor: ew-resize; touch-action: none; }
 .hoverable { cursor: crosshair; }
