@@ -87,7 +87,7 @@ export function MonthGrid({ year, month, min, max, sel, preview, onPick, onHover
 // the window (same day twice → open that night). Folds in the preset list (rolling
 // windows + calendar-unit snaps) and embeds the brush, so the picker is the one
 // place to steer the date range. onApply keeps applyPick's start===end semantics. ----
-export function RangePicker({ min, max, init, onApply, activeRange, activeGran, onGran, onRange, brush, hint, onClose, anchorRef, onMouseEnter, onMouseLeave }) {
+export function RangePicker({ min, max, init, onApply, activeRange, activeGran, onGran, onRange, brush, hint, pickHint, onClose, anchorRef, onMouseEnter, onMouseLeave }) {
   const [start, setStart] = useState(null);
   const [end, setEnd] = useState(null);
   const [hoverDay, setHoverDay] = useState(null);
@@ -153,7 +153,7 @@ export function RangePicker({ min, max, init, onApply, activeRange, activeGran, 
             <MonthGrid year={view.y} month={view.m} min={min} max={max} sel={sel} preview={preview} onPick={pick} onHover={setHoverDay} />
             <MonthGrid year={next.y} month={next.m} min={min} max={max} sel={sel} preview={preview} onPick={pick} onHover={setHoverDay} />
           </div>
-          <div className={s.pickHint}>Click a start day, then an end day. Click the same day twice to open that night.</div>
+          <div className={s.pickHint}>{pickHint || 'Click a start day, then an end day. Click the same day twice to open that night.'}</div>
           {brush}
           {hint && <div className={s.pickHint}>{hint}</div>}
         </div>

@@ -1,0 +1,15 @@
+{
+  "description": "Copy to labels/fitness-goals.json and edit. Fitness goals shown on the Overview tab. per:'week' sums the metric over Mon-Sun calendar weeks; per:'day' scores each day on its own. Metrics: z2 / z4 = minutes at >=65% / >=85% of personal HRmax during explicit workouts (Apple Health + Peloton, deduped); exercise_min = Apple exercise-ring minutes; steps = daily steps; active_energy = active kcal burned (move ring); stand_hours = distinct hours with stand time (stand ring); stand_min = stand minutes; asleep_min = effective sleep per night; deep_min = deep-sleep minutes per night; sessions / session_min = merged explicit workouts. short (optional) sets the row label in the Targets strip. color (optional) overrides the chart color with any CSS color. shape:'violin' (weekly goals only) draws each week as a vertical violin whose axis is the days of the week: each day stacks a slice as tall as its minutes (top tip = weekly sum) and as wide as its minutes.",
+  "pelotonUser": null,
+  "goals": [
+    { "id": "z4", "label": "Zone 4+ minutes", "metric": "z4", "per": "week", "target": 10, "unit": "min", "shape": "violin" },
+    { "id": "z2", "label": "Zone 2+ minutes", "metric": "z2", "per": "week", "target": 150, "unit": "min", "shape": "violin" },
+    { "id": "exercise", "label": "Exercise minutes", "metric": "exercise_min", "per": "week", "target": 210, "unit": "min", "shape": "violin" },
+    { "id": "exercise-daily", "label": "Exercise ring", "metric": "exercise_min", "per": "day", "target": 30, "unit": "min", "short": "EX30" },
+    { "id": "steps", "label": "Steps", "metric": "steps", "per": "day", "target": 7000, "unit": "steps" },
+    { "id": "move", "label": "Active energy", "metric": "active_energy", "per": "day", "target": 750, "unit": "kcal", "short": "MOVE" },
+    { "id": "stand", "label": "Stand hours", "metric": "stand_hours", "per": "day", "target": 12, "unit": "hours", "short": "STAND" },
+    { "id": "sleep", "label": "Sleep", "metric": "asleep_min", "per": "day", "target": 420, "unit": "min" },
+    { "id": "deep", "label": "Deep sleep", "metric": "deep_min", "per": "day", "target": 60, "unit": "min" }
+  ]
+}

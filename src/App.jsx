@@ -10,6 +10,7 @@ import Health from './pages/Health.jsx';
 import Neat from './pages/Neat.jsx';
 import Cardio from './pages/Cardio.jsx';
 import Sleep from './pages/Sleep.jsx';
+import Overview from './pages/Overview.jsx';
 import s from './App.module.css';
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
       <header className={s.header}>
         <NavLink to="/" className={s.wordmark}>VIGOR<small>HEALTH</small></NavLink>
         <nav className={s.nav}>
+          <NavLink to="/overview" className={navClass}>Overview</NavLink>
           <NavLink to="/" end className={navClass}>Lift</NavLink>
           <NavLink to="/sync" className={navClass}>Sync</NavLink>
           <NavLink to="/viz" className={navClass}>Movement Report</NavLink>
@@ -59,6 +61,7 @@ export default function App() {
         <Route path="/neat" element={<Neat />} />
         <Route path="/cardio" element={<Cardio />} />
         <Route path="/sleep" element={<Sleep />} />
+        <Route path="/overview" element={<Overview />} />
       </Routes>
     </>
   );
