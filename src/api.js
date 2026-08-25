@@ -56,5 +56,6 @@ export const getHealthWorkoutSeries = (idx, metric = 'HeartRate') =>
   get(`/api/health/workout/series?idx=${idx}&metric=${encodeURIComponent(metric)}`);
 export const getProfile = () => get('/api/profile');
 export const getHealthSleep = () => get('/api/health/sleep');
+export const getHealthGoals = () => get('/api/health/goals');
 export const getHealthSleepSeries = () => get('/api/health/sleep/series');
 export const getHealthSleepNight = date => get(`/api/health/sleep/night?date=${encodeURIComponent(date)}`);

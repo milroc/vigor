@@ -20,6 +20,7 @@ const { computeFitness } = require('./scripts/healthFitness.cjs');
 // Trainer-session reproduction logic lives with its ground-truth labels.
 const { computeTrainerSessions } = require('./labels/trainer-sessions.cjs');
 const { computeSleep, computeNight, computeSleepSeries } = require('./scripts/sleepSessions.cjs');
+const { computeGoalDays, DEFAULT_GOALS } = require('./scripts/goalMetrics.cjs');
 let _duckCon = null, _duckInit = null;
 function duck() {
   if (_duckCon) return Promise.resolve(_duckCon);
@@ -1106,15 +1107,26 @@ const server = http.createServer((req, res) => {
         FROM ah_records WHERE metric = 'HeartRate' AND CAST(start_ts AS DATE) = ${D}
           AND value >= 30
         GROUP BY 1 ORDER BY 1`);
+      // Raw (unaveraged) HR samples inside each workout window, keyed by
+      // workout idx — the Overview day modal's per-workout sparklines.
+      const workoutHr = await one(`
+        SELECT w.idx, CAST(date_diff('second', w.start_ts, r.start_ts) AS INT) AS sec,
+               CAST(r.value AS DOUBLE) AS v
+        FROM ah_workouts w JOIN ah_records r ON r.metric = 'HeartRate'
+          AND r.start_ts BETWEEN w.start_ts AND w.end_ts
+        WHERE CAST(w.start_ts AS DATE) = ${D} AND r.value >= 30
+        ORDER BY w.idx, sec`);
       const hourly = await one(`
         SELECT hr AS hour,
                sum(CASE WHEN metric='StepCount' THEN mx END) AS steps,
-               sum(CASE WHEN metric='ActiveEnergyBurned' THEN mx END) AS active
+               sum(CASE WHEN metric='ActiveEnergyBurned' THEN mx END) AS active,
+               sum(CASE WHEN metric='AppleExerciseTime' THEN mx END) AS exercise,
+               sum(CASE WHEN metric='AppleStandTime' THEN mx END) AS stand
         FROM (
           SELECT metric, hr, max(v) AS mx FROM (
             SELECT metric, CAST(date_part('hour', start_ts) AS INT) AS hr, source, sum(value) AS v
             FROM ah_records
-            WHERE metric IN ('StepCount','ActiveEnergyBurned') AND CAST(start_ts AS DATE) = ${D}
+            WHERE metric IN ('StepCount','ActiveEnergyBurned','AppleExerciseTime','AppleStandTime') AND CAST(start_ts AS DATE) = ${D}
             GROUP BY 1, 2, 3
           ) GROUP BY metric, hr
         ) GROUP BY hr ORDER BY hr`);
@@ -1126,7 +1138,7 @@ const server = http.createServer((req, res) => {
         neat_energy: Math.max(active - workoutEnergy, 0),
         hr_hours: wh?.hr_hours ?? 0, hr_samples: wh?.hr_samples ?? 0,
       };
-      json(res, 200, { ok: true, data: { date, metrics, workouts, hr, hourly } });
+      json(res, 200, { ok: true, data: { date, metrics, workouts, hr, hourly, workout_hr: workoutHr } });
     }).catch(e => json(res, 500, { ok: false, error: e.message }));
     return;
   }
@@ -1311,6 +1323,38 @@ const server = http.createServer((req, res) => {
       await setupViews(con);
       const data = await computeTrainerSessions(con, { labels });
       json(res, 200, { ok: true, data: { ...data, captions } });
+    }).catch(e => json(res, 500, { ok: false, error: e.message }));
+    return;
+  }
+
+  // Daily goal metrics + the configurable goal list (labels/fitness-goals.json,
+  // falling back to built-in defaults) for the Overview tab.
+  if (req.method === 'GET' && pathname === '/api/health/goals') {
+    let config = null;
+    const file = path.join(__dirname, 'labels', 'fitness-goals.json');
+    if (fs.existsSync(file)) {
+      try { config = JSON.parse(fs.readFileSync(file, 'utf8')); }
+      catch { return json(res, 500, { ok: false, error: 'labels/fitness-goals.json is corrupt' }); }
+    }
+    const goals = (config && config.goals) || DEFAULT_GOALS;
+    if (!fs.existsSync(path.join(STORE, 'records'))) {
+      return json(res, 200, { ok: true, data: { goals, hrMax: null, days: [] } });
+    }
+    // Peloton session windows from the newest backup per user (optionally
+    // narrowed to one household member via config.pelotonUser).
+    const pelotonWindows = [];
+    try {
+      let backs = latestPelotonBackups();
+      if (config && config.pelotonUser) backs = backs.filter(b => b.user === config.pelotonUser);
+      for (const b of backs) {
+        const ws = fromCsv(fs.readFileSync(path.join(__dirname, 'backups', b.name, 'workouts.csv'), 'utf8'));
+        for (const w of ws) if (w.status === 'COMPLETE' && w.start) pelotonWindows.push({ start: w.start, end: w.end });
+      }
+    } catch { /* no peloton backups */ }
+    duck().then(async con => {
+      await setupViews(con);
+      const data = await computeGoalDays(con, { pelotonWindows });
+      json(res, 200, { ok: true, data: { goals, ...data } });
     }).catch(e => json(res, 500, { ok: false, error: e.message }));
     return;
   }

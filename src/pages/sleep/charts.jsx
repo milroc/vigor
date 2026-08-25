@@ -636,7 +636,14 @@ export function Consistency({ nights, win, hover, onHover, onOpen, targets, padL
 // (faint bars), sharing the date axis with the nap/debt chart above. ----
 // Generic per-night line/bars chart sharing the date axis with every other
 // chart (identical PAD_L/PAD_R). valueAt(i) returns the value for night index i.
-export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'line', hover, onHover, onOpen, H = 116, padL = PAD_L, section }) {
+// Optional `target` (bars only): draws a lime dashed goal line (axis tick +
+// label, same treatment as the Stage Composition sleep goal) and splits bar
+// opacity into met (solid) vs missed (faded). `targetLabel` overrides the
+// axis label text (e.g. "7k").
+// `filledAt(i)` (bubble only): when provided, day i's bubble renders filled
+// when true and as a hollow outline when false — a binary met/missed overlay
+// on top of the area encoding.
+export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'line', target, targetLabel, filledAt, hover, onHover, onOpen, H = 116, padL = PAD_L, section }) {
   const [ref, w] = useMeasure();
   const PAD = { t: 14, r: PAD_R, b: 6, l: padL };
   const [lo, hi] = win;
@@ -650,7 +657,7 @@ export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'li
   const [yMin, yMax] = useMemo(() => {
     const vs = pts.map(p => p.v);
     if (!vs.length) return [0, 1];
-    if (type === 'bars') return [0, Math.max(1, ...vs) * 1.05];
+    if (type === 'bars') return [0, Math.max(Math.max(1, ...vs) * 1.05, target != null ? target * 1.25 : 0)];
     const mn = Math.min(...vs), mx = Math.max(...vs), pad = (mx - mn) * 0.12 || 1;
     return [mn - pad, mx + pad];
   }, [pts, type]);
@@ -667,20 +674,26 @@ export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'li
     if (!w || !pts.length) return null;
     if (type === 'bars') {
       const bw = Math.max(cw - 0.6, 0.8);
-      return pts.map(p => <rect key={p.i} x={PAD.l + (p.i - lo) * cw} y={y(p.v)} width={bw} height={PAD.t + plotH - y(p.v)} fill={color} opacity={0.55} />);
+      return pts.map(p => <rect key={p.i} x={PAD.l + (p.i - lo) * cw} y={y(p.v)} width={bw} height={PAD.t + plotH - y(p.v)}
+        fill={color} opacity={target != null ? (p.v >= target ? 0.8 : 0.3) : 0.55} />);
     }
     if (type === 'bubble') {
       const cy = PAD.t + plotH / 2;
       const maxR = Math.min(Math.max(cw * 0.5, 2.5), 7);
       const norm = v => bvMax > bvMin ? (v - bvMin) / (bvMax - bvMin) : 1;
       // area ∝ value: r = maxR·√(floor + (1-floor)·norm); a floor keeps the smallest bubble visible.
-      return pts.map(p => <circle key={p.i} cx={X(p.i)} cy={cy} r={Math.max(maxR * Math.sqrt(0.16 + 0.84 * norm(p.v)), 1)} fill={color} opacity={0.72} />);
+      return pts.map(p => {
+        const r = Math.max(maxR * Math.sqrt(0.16 + 0.84 * norm(p.v)), 1);
+        const filled = filledAt ? filledAt(p.i) : true;
+        return <circle key={p.i} cx={X(p.i)} cy={cy} r={r}
+          fill={filled ? color : 'none'} stroke={filled ? 'none' : color} strokeWidth={filled ? 0 : 1} opacity={filled ? 0.72 : 0.6} />;
+      });
     }
     let d = '', pen = false;
     pts.forEach(p => { d += `${pen ? 'L' : 'M'}${X(p.i)} ${y(p.v)}`; pen = true; });
     return <path d={d} fill="none" stroke={color} strokeWidth={1.6} />;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pts, w, yMin, yMax]);
+  }, [pts, w, yMin, yMax, target, filledAt]);
 
   const idxAt = e => { const r = ref.current.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * w; return clamp(lo + Math.floor((px - PAD.l) / cw), lo, hi); };
   const hot = hover != null && hover >= lo && hover <= hi;
@@ -690,10 +703,17 @@ export function MiniChart({ nights, win, valueAt, color, unit, label, type = 'li
       {w > 0 && (
         <svg className={`${s.svg} ${onOpen ? s.clickable : s.hoverable}`} width="100%" height={H} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none"
           onPointerMove={e => onHover({ i: idxAt(e), cx: e.clientX, cy: e.clientY, section })} onClick={onOpen ? e => onOpen(idxAt(e)) : undefined}>
-          {type !== 'bubble' && niceTicks(yMin, yMax, 3).filter(g => g > yMin && g < yMax).map(g => (
+          {type !== 'bubble' && niceTicks(yMin, yMax, 3).filter(g => g > yMin && g < yMax && (target == null || Math.abs(y(g) - y(target)) >= 9)).map(g => (
             <g key={g}><line x1={PAD.l} x2={w - PAD.r} y1={y(g)} y2={y(g)} stroke="var(--line)" />
               <text x={PAD.l - 6} y={y(g) + 3} fill="var(--dim)" fontSize="10" textAnchor="end">{g}</text></g>
           ))}
+          {target != null && type === 'bars' && (
+            <g pointerEvents="none">
+              <line x1={PAD.l} x2={w - PAD.r} y1={y(target)} y2={y(target)} stroke="var(--lime)" strokeWidth="1" strokeDasharray="4 4" opacity={0.35} />
+              <line x1={PAD.l} x2={PAD.l + 5} y1={y(target)} y2={y(target)} stroke="var(--lime)" strokeWidth="1.5" />
+              <text x={PAD.l - 6} y={y(target) + 3} fill="var(--lime)" fontSize="10" textAnchor="end">{targetLabel || String(target)}</text>
+            </g>
+          )}
           {type === 'bubble' && pts.length > 0 && (
             <text x={PAD.l - 6} y={PAD.t + plotH / 2 + 3} fill="var(--dim)" fontSize="9" textAnchor="end">{bvMin}–{bvMax}</text>
           )}
